@@ -21,7 +21,7 @@ debug builds of the libraries, and the demo scene `demo/hex_island.tscn`.
 | `9518435` | Docs | Add this file |
 | `3a5c3ae` | Demo scene | Fewer fireflies at the camp |
 | `d0d21c8` | Terrain shaders | Wet ground keeps its colour instead of turning grey |
-| *(next)* | Terrain LOD | Spread distant-LOD chunk rebuilds over frames (no orbit stutter) |
+| `9546014` | Terrain LOD | Spread distant-LOD chunk rebuilds over frames (no orbit stutter) |
 
 Each commit that touches Rust source also updates the matching prebuilt debug library in `bin/`,
 because upstream ships those libraries and the demo runs from them without a Rust build.
@@ -187,7 +187,7 @@ compile errors.
 
 ---
 
-## Spread distant-LOD chunk rebuilds over frames — "Spread distant-LOD chunk rebuilds over frames"
+## Spread distant-LOD chunk rebuilds over frames — `9546014`
 
 **Problem.** Zoomed fully out (100 m), turning the camera quickly stuttered.
 
