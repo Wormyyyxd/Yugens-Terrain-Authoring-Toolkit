@@ -426,6 +426,7 @@ struct EnvBase {
     fog_enabled: bool,
     fog_density: f32,
     fog_color: Color,
+    fog_sky_affect: f32,
     bg_color: Color,
 }
 
@@ -1152,9 +1153,9 @@ impl PixelWeather {
         let sun = self.sun_node();
         let env = self.environment_node().and_then(|w| w.get_environment());
         if self.env_base.is_none() {
-            let (fe, fd, fc, ae, bg) = match &env {
-                Some(e) => (e.is_fog_enabled(), e.get_fog_density(), e.get_fog_light_color(), e.get_ambient_light_energy(), e.get_bg_color()),
-                None => (false, 0.0, Color::WHITE, 1.0, Color::BLACK),
+            let (fe, fd, fc, fs, ae, bg) = match &env {
+                Some(e) => (e.is_fog_enabled(), e.get_fog_density(), e.get_fog_light_color(), e.get_fog_sky_affect(), e.get_ambient_light_energy(), e.get_bg_color()),
+                None => (false, 0.0, Color::WHITE, 1.0, 1.0, Color::BLACK),
             };
             self.env_base = Some(EnvBase {
                 sun_energy: sun.as_ref().map(|s| s.get_param(Param::ENERGY)).unwrap_or(1.0),
@@ -1162,6 +1163,7 @@ impl PixelWeather {
                 fog_enabled: fe,
                 fog_density: fd,
                 fog_color: fc,
+                fog_sky_affect: fs,
                 bg_color: bg,
             });
         }
@@ -1173,8 +1175,14 @@ impl PixelWeather {
             e.set_ambient_light_energy(b.ambient_energy * eff.ambient_scale + flash * self.flash_energy);
             e.set_bg_color(overcast(b.bg_color, eff.sky_darken).lerp(Color::from_rgb(0.85, 0.88, 1.0), (flash * 0.5) as f64));
             let density = if b.fog_enabled { b.fog_density } else { 0.0 } + eff.fog_density;
-            e.set_fog_enabled(b.fog_enabled || eff.fog_density > 1e-5);
+            // Always on while a weather drives the environment (zero density = no fog): fog on /
+            // off is a shader specialization in the Compatibility renderer, so toggling it would
+            // recompile every visible material whenever a foggy weather starts. The background
+            // counts as infinitely far, so zero-density fog would still tint it: keep the fog off
+            // the sky until there is fog.
+            e.set_fog_enabled(true);
             e.set_fog_density(density);
+            e.set_fog_sky_affect(if density > 1e-5 { b.fog_sky_affect } else { 0.0 });
             e.set_fog_light_color(b.fog_color.lerp(eff.fog_color, eff.fog_mix as f64));
         }
     }
@@ -1196,6 +1204,7 @@ fn restore(e: &mut Gd<Environment>, b: &EnvBase) {
     e.set_fog_enabled(b.fog_enabled);
     e.set_fog_density(b.fog_density);
     e.set_fog_light_color(b.fog_color);
+    e.set_fog_sky_affect(b.fog_sky_affect);
 }
 
 /// Recursive midpoint displacement with side branches: (start, end, half width) segments.

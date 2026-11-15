@@ -289,6 +289,9 @@ pub struct PixelDayNight {
 
     /// Fog was switched on for PixelWeather only (not `apply_fog`).
     weather_fog_on: bool,
+    /// The environment's own `fog_sky_affect`, captured before fog is first graded: fog stays
+    /// enabled at zero density while a weather has none, and is kept off the sky meanwhile.
+    fog_sky_base: Option<f32>,
     #[export_subgroup(name = "Light", prefix = "light_")]
     #[export_group(name = "Lighting")]
     /// Cel light ramp for every pixel shader's sun light (replaces the even toon bands):
@@ -354,6 +357,7 @@ impl INode for PixelDayNight {
             fog_night_density: 0.006,
             fog_density_curve: None,
             weather_fog_on: false,
+            fog_sky_base: None,
             light_ramp_preset: 0,
             light_ramp: None,
             light_wrap: 0.0,
@@ -558,14 +562,28 @@ impl PixelDayNight {
     fn grade_fog(&mut self, mut env: Gd<Environment>, key: &Key, t: f32, night: f32) {
         let weather = super::weather::mix();
         let weather_fog = weather.map(|m| m.p.fog_density).unwrap_or(0.0);
+        let sky_base = *self.fog_sky_base.get_or_insert_with(|| env.get_fog_sky_affect());
         if !self.apply_fog && weather_fog <= 1e-5 {
-            if self.weather_fog_on {
+            if weather.is_some() {
+                // A weather can bring fog in at any moment: keep fog enabled at zero density
+                // instead of switching it off. In the Compatibility renderer fog on / off is a
+                // shader specialization, so toggling it recompiles every visible material (a
+                // 100-200 ms hitch the first time a foggy weather such as Rain starts). The
+                // background counts as infinitely far, so even zero-density fog would paint it
+                // the fog colour: keep the fog off the sky until there is fog.
+                crate::set_changed!(env, is_fog_enabled, set_fog_enabled, true);
+                crate::set_changed!(env, get_fog_density, set_fog_density, 0.0);
+                crate::set_changed!(env, get_fog_sky_affect, set_fog_sky_affect, 0.0);
+                self.weather_fog_on = true;
+            } else if self.weather_fog_on {
                 // Weather fog cleared and the day/night does not drive fog: switch it back off.
                 crate::set_changed!(env, is_fog_enabled, set_fog_enabled, false);
+                crate::set_changed!(env, get_fog_sky_affect, set_fog_sky_affect, sky_base);
                 self.weather_fog_on = false;
             }
             return;
         }
+        crate::set_changed!(env, get_fog_sky_affect, set_fog_sky_affect, sky_base);
         let mut color = match &mut self.fog_gradient {
             Some(g) => g.sample(t),
             None => key.sky_horizon.lerp(key.ambient, 0.25),
