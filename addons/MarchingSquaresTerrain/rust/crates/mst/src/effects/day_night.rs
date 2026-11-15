@@ -566,8 +566,15 @@ impl PixelDayNight {
         let weather = super::weather::mix();
         let weather_fog = weather.map(|m| m.p.fog_density).unwrap_or(0.0);
         let sky_base = *self.fog_sky_base.get_or_insert_with(|| env.get_fog_sky_affect());
+        // A PixelRenderer draws the fog after its palette (render/post_fog.rs): hand it over
+        // and keep the Environment's own fog off.
+        let post = crate::render::post_fog::active();
         if !self.apply_fog && weather_fog <= 1e-5 {
-            if weather.is_some() {
+            if weather.is_some() && post {
+                crate::render::post_fog::grade_sky(&mut env, None);
+                crate::render::post_fog::publish(crate::render::post_fog::Fog { color: env.get_fog_light_color(), density: 0.0, sky_affect: 0.0 });
+                self.weather_fog_on = true;
+            } else if weather.is_some() {
                 // A weather can bring fog in at any moment: keep fog enabled at zero density
                 // instead of switching it off. In the Compatibility renderer fog on / off is a
                 // shader specialization, so toggling it recompiles every visible material (a
@@ -605,6 +612,12 @@ impl PixelDayNight {
             // Weather fog color, darkened at night like everything else.
             let wc = m.p.fog_color.lerp(key.ambient.darkened(0.6), (night * 0.8) as f64);
             color = color.lerp(wc, m.p.fog_mix as f64);
+        }
+        if post {
+            let fog = crate::render::post_fog::Fog { color, density: density.max(0.0), sky_affect: sky_base };
+            crate::render::post_fog::grade_sky(&mut env, Some(fog));
+            crate::render::post_fog::publish(fog);
+            return;
         }
         crate::set_changed!(env, is_fog_enabled, set_fog_enabled, true);
         crate::set_changed!(env, get_fog_light_color, set_fog_light_color, color);

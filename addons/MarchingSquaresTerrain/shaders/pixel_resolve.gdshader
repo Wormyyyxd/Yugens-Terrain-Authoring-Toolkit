@@ -69,6 +69,16 @@ uniform int dither_size = 4;
 uniform float saturation = 1.0;
 uniform float contrast = 1.0;
 uniform float brightness = 0.0;
+/// Post-palette fog (PixelRenderer.post_fog, render/post_fog.rs): Godot's exponential fog
+/// `1 - exp(-fog_density * distance)` on surfaces, drawn after the palette so fogged surfaces
+/// keep their palette colours instead of snapping to the grey ramp. The background is left to
+/// the Environment (fog at zero density fogs only the sky, and keeps rain drawn over it).
+uniform bool fog_enabled = false;
+uniform vec4 fog_color : source_color = vec4(0.5, 0.55, 0.62, 1.0);
+uniform float fog_density = 0.0;
+/// true: ordered dither between the palette colour and the palette-snapped fog colour (stays
+/// on the palette); false: smooth blend towards the fog colour.
+uniform bool fog_dither = true;
 group_uniforms;
 
 group_uniforms God_Rays;
@@ -412,6 +422,16 @@ vec3 fetch_color(ivec2 s) {
 	return textureLod(color_tex, src_uv(s), 0.0).rgb;
 }
 
+// Distance from the camera to the surface seen through source texel s at view depth `depth`
+// (the meta pass stores depth along the view axis; Godot's fog uses the distance).
+float view_distance(ivec2 s, float depth) {
+	if (cam_ortho) {
+		return depth;
+	}
+	vec2 ndc = vec2((float(s.x) + 0.5) / float(source_size.x) * 2.0 - 1.0, 1.0 - (float(s.y) + 0.5) / float(source_size.y) * 2.0);
+	return depth * length(cam_forward + cam_right * ndc.x + cam_up * ndc.y);
+}
+
 vec3 lut(vec3 c) {
 	vec3 q = floor(clamp(c, 0.0, 1.0) * 31.0 + 0.5);
 	vec2 uv = vec2((q.b * 32.0 + q.r + 0.5) / 1024.0, (q.g + 0.5) / 32.0);
@@ -570,6 +590,19 @@ void fragment() {
 		}
 		if (palette_enabled && m0.pal) {
 			col = mix(col, lut(col), palette_mix);
+		}
+		if (fog_enabled && m0.obj) {
+			float f = 1.0 - exp(-fog_density * view_distance(c0, m0.depth));
+			if (fog_dither && palette_enabled && m0.pal) {
+				// Ordered dither between the surface's palette colour and the palette-snapped
+				// fog colour: every texel stays on the palette and the fog reads as a fade
+				// instead of a mix that the palette would snap to grey.
+				vec3 fc = mix(fog_color.rgb, lut(fog_color.rgb), palette_mix);
+				float th = (dither_enabled && m0.dith) ? jitter + 0.5 / float(dither_size * dither_size) : 0.5;
+				col = f > th ? fc : col;
+			} else {
+				col = mix(col, fog_color.rgb, f);
+			}
 		}
 		COLOR = vec4(clamp(col, 0.0, 1.0), 1.0);
 	}

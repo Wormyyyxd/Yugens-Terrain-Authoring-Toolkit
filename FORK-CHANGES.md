@@ -25,7 +25,8 @@ debug builds of the libraries, and the demo scene `demo/hex_island.tscn`.
 | `15d3a0f` | Pixel renderer | Warm up the shadow-off variant too (no freeze at the first night) |
 | ~~`596d005`~~ | Weather | ~~Thin weather fog as a third-person camera zooms out~~ — **reverted** by the next row |
 | `857a984` | Terrain LOD | Keep chunks at full detail for 3 s; keep collision when dropping detail |
-| *(next)* | Weather | Revert `596d005` (it moved the grey problem around instead of fixing it) |
+| `0027345` | Weather | Revert `596d005` (it moved the grey problem around instead of fixing it) |
+| *(next)* | Pixel renderer | Draw fog after the palette, so fogged things keep their colour |
 
 Each commit that touches Rust source also updates the matching prebuilt debug library in `bin/`,
 because upstream ships those libraries and the demo runs from them without a Rust build.
@@ -323,6 +324,59 @@ the cost of a flip.
 Cold-cache regression run of the fire / weather sequence, the night jumps and the orbits with
 this build: no frame over 25 ms except one 323 ms frame after Snow in a single run, which did not
 reproduce in two repeats (with this build and with the previous one).
+
+---
+
+## Draw fog after the palette — "Draw fog after the palette so fogged surfaces keep their colour"
+
+**Problem.** In Rain, Foggy, Cloudy and Storm, fogged ground, cliffs and paths turned flat grey,
+at any zoom (worse zoomed out, where everything is far from the camera). The reverted `596d005`
+only changed how much fog there was.
+
+**Cause.** Godot's Environment fog is drawn in the 3D scene, *before* the pixel renderer snaps
+the image to its palette. Fog mixes every surface towards the fog colour, so colours come out
+muted; the palette's browns, tans and greens are all fairly saturated, so the nearest palette
+entry to a muted brown or green is one of its greys. Shown by rendering the same Rain view with
+the palette off (a hazy but clearly coloured image) and on (flat grey).
+
+**Change.** The fog moves into the pixel renderer and is drawn after the palette:
+
+- New `render/post_fog.rs`. While a `PixelRenderer` with the new `post_fog` setting (on by
+  default, game only; the editor preview is unchanged) is running, `PixelDayNight` and
+  `PixelWeather` publish their fog (colour, density, sky amount) there instead of grading the
+  Environment with it.
+- The Environment keeps only the sky's share: fog enabled at **zero density** with the sky
+  amount. Godot treats the background as infinitely far, so this fogs the sky exactly as before,
+  and rain drawn in front of the sky stays visible. Fog is never switched on or off on the
+  Environment any more, so it can never trigger a specialization recompile.
+- `pixel_resolve.gdshader` applies Godot's exponential fog, `1 − exp(−density × distance)`, to
+  every surface after the palette, using the distance from the metadata pass. Surfaces snap to
+  their own palette colour first and only then fade towards the fog colour.
+- New `PixelRenderer.post_fog_dither` (off by default). Off: a smooth blend towards the fog
+  colour (soft haze; fogged texels leave the palette). On: an ordered dither between the palette
+  colour and the palette-snapped fog colour (strictly palette colours, but reads as a stipple).
+- A scene that sets fog directly on its Environment, without a weather or day-night node, is
+  taken over the same way while the renderer runs and given back when it exits.
+- `PixelSky`'s cloud deck is drawn only in the colour pass, so the resolve has no distance for
+  it: the deck shader (`sky_clouds.gdshader`) applies the renderer's current fog itself
+  (`post_fog` uniform, fed by `PixelSky` from `post_fog::current()`).
+
+**Files.** `addons/MarchingSquaresTerrain/rust/crates/mst/src/render/post_fog.rs` (new),
+`.../render/mod.rs`, `.../render/renderer.rs`, `.../effects/day_night.rs`,
+`.../effects/weather.rs`, `.../effects/sky.rs`,
+`addons/MarchingSquaresTerrain/shaders/pixel_resolve.gdshader`,
+`addons/MarchingSquaresTerrain/shaders/sky_clouds.gdshader`; rebuilt
+`addons/MarchingSquaresTerrain/bin/marching_squares_terrain.dll`.
+
+**Verified.**
+- Rendered before / after at the default zoom for Clear, Rain and Foggy, and Rain at 100 m:
+  Clear is unchanged (the only differing pixels are the waterfall's animation frame); in Rain
+  and Foggy, distant cliffs, paths and trees keep their brown, tan and green and fade into the
+  fog instead of turning grey; rain over the sky and the fogged cloud deck look as before.
+- Dithered and smooth styles both rendered; smooth chosen as the default (the dither reads as
+  noise even in light fog).
+- Cold shader cache: fire / Rain / Snow / Storm sequence and the Night / Dawn / Noon jumps, worst
+  frame 21 ms.
 
 ---
 

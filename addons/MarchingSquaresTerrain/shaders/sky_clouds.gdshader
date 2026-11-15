@@ -9,6 +9,10 @@ uniform vec4 cloud_color : source_color = vec4(1.0, 0.98, 0.95, 1.0);
 uniform vec4 shade_color : source_color = vec4(0.72, 0.74, 0.85, 1.0);
 uniform float opacity : hint_range(0.0, 1.0) = 0.85;
 uniform int alpha_bands : hint_range(1, 8) = 3;
+/// PixelRenderer post fog (render/post_fog.rs): rgb = fog colour, a = density. The deck is not
+/// on the metadata layer, so the renderer cannot fog it after the palette; and the Environment's
+/// fog is held at zero density meanwhile. 0 = no fog here.
+uniform vec4 post_fog : source_color = vec4(0.0);
 
 varying vec3 world_pos;
 
@@ -24,6 +28,9 @@ void fragment() {
 	ALBEDO = mix(cloud_color.rgb, shade_color.rgb, step(0.5, shade));
 	// Darken with the night factor published by PixelDayNight.
 	ALBEDO *= mix(1.0, 0.25, pt_night);
+	if (post_fog.a > 0.0) {
+		ALBEDO = mix(ALBEDO, post_fog.rgb, 1.0 - exp(-post_fog.a * length(VERTEX)));
+	}
 	float b = float(alpha_bands);
 	ALPHA = floor(d * opacity * b + 0.5) / b;
 }

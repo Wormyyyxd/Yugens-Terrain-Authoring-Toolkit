@@ -1175,6 +1175,13 @@ impl PixelWeather {
             e.set_ambient_light_energy(b.ambient_energy * eff.ambient_scale + flash * self.flash_energy);
             e.set_bg_color(overcast(b.bg_color, eff.sky_darken).lerp(Color::from_rgb(0.85, 0.88, 1.0), (flash * 0.5) as f64));
             let density = if b.fog_enabled { b.fog_density } else { 0.0 } + eff.fog_density;
+            if crate::render::post_fog::active() {
+                // A PixelRenderer draws the fog after its palette (render/post_fog.rs).
+                let fog = crate::render::post_fog::Fog { color: b.fog_color.lerp(eff.fog_color, eff.fog_mix as f64), density, sky_affect: b.fog_sky_affect };
+                crate::render::post_fog::grade_sky(&mut e, Some(fog));
+                crate::render::post_fog::publish(fog);
+                return;
+            }
             // Always on while a weather drives the environment (zero density = no fog): fog on /
             // off is a shader specialization in the Compatibility renderer, so toggling it would
             // recompile every visible material whenever a foggy weather starts. The background

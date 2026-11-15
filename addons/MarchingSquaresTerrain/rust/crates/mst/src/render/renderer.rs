@@ -217,6 +217,20 @@ pub struct PixelRenderer {
     contrast: f32,
     #[export(range = (-1.0, 1.0, 0.01))]
     brightness: f32,
+    /// Draw the fog here, after the palette, instead of in the 3D scene (game only; the editor
+    /// preview keeps the Environment's fog). Environment fog mutes colours before the palette
+    /// snap, and muted browns / greens land on the palette's grey ramp, so fogged ground read as
+    /// flat grey. With this on, surfaces keep their palette colours and fade towards the
+    /// palette-snapped fog colour by distance (an ordered dither with the palette on).
+    /// PixelDayNight / PixelWeather hand their fog over; a scene's own Environment fog is taken
+    /// over too (and restored when the renderer leaves). See `post_fog.rs`.
+    #[export]
+    post_fog: bool,
+    /// Post fog as an ordered dither between each texel's palette colour and the
+    /// palette-snapped fog colour (stays on the palette, reads as a stipple). Off: a smooth blend
+    /// towards the fog colour after the palette (soft haze; fogged texels leave the palette).
+    #[export]
+    post_fog_dither: bool,
 
     #[export_group(name = "God Rays")]
     /// Stable3D light-sheet god rays (port of `StablePixelArtGodRays.ush`, MIT): world-anchored
@@ -329,6 +343,11 @@ pub struct PixelRenderer {
     warm_up_shaders: bool,
 
     warmup: super::warmup::ShaderWarmup,
+    /// This renderer counts in `post_fog::active()`.
+    post_fog_registered: bool,
+    /// A scene Environment whose own fog was taken over for post fog (re-enabled on release),
+    /// and that fog.
+    adopted_fog: Option<(Gd<Environment>, super::post_fog::Fog)>,
     pipeline: Option<Pipeline>,
     outline_tex: Option<Gd<ImageTexture>>,
     outline_key: (u64, i64, Vec<[u32; 4]>),
@@ -484,6 +503,10 @@ impl INode for PixelRenderer {
             debug_view: 0,
             warm_up_shaders: true,
             warmup: Default::default(),
+            post_fog: true,
+            post_fog_dither: false,
+            post_fog_registered: false,
+            adopted_fog: None,
             pipeline: None,
             outline_tex: None,
             outline_key: (0, 0, Vec::new()),
@@ -509,6 +532,8 @@ impl INode for PixelRenderer {
         if !is_editor() && self.enabled {
             self.build();
         }
+        // Before the first frame, so fog producers hand over from their first process on.
+        self.update_post_fog_registration();
     }
 
     fn process(&mut self, delta: f64) {
@@ -523,6 +548,7 @@ impl INode for PixelRenderer {
                 self.build();
             }
         }
+        self.update_post_fog_registration();
         if self.pipeline.is_some() {
             self.sync();
         }
@@ -543,6 +569,7 @@ impl INode for PixelRenderer {
 
     fn exit_tree(&mut self) {
         self.warmup.clear();
+        self.set_post_fog_registered(false);
         globals::set("pt_rays_a", &Vector4::ZERO.to_variant());
         self.sun_ref.reset();
         self.teardown();
@@ -761,6 +788,51 @@ impl PixelRenderer {
         {
             cam.set_cull_mask(self.saved_cull_mask);
         }
+    }
+
+    /// Post fog is on while this renderer runs in the game with `post_fog` set.
+    fn update_post_fog_registration(&mut self) {
+        let want = self.post_fog && self.enabled && !is_editor() && self.pipeline.is_some() && self.base().is_inside_tree();
+        self.set_post_fog_registered(want);
+    }
+
+    fn set_post_fog_registered(&mut self, on: bool) {
+        if on == self.post_fog_registered {
+            return;
+        }
+        super::post_fog::register(on);
+        self.post_fog_registered = on;
+        if !on {
+            super::post_fog::set_current(None);
+        }
+        if !on && let Some((mut env, fog)) = self.adopted_fog.take() {
+            // Give a scene Environment its own fog back.
+            env.set_fog_density(fog.density);
+            env.set_fog_sky_affect(fog.sky_affect);
+        }
+    }
+
+    /// This frame's post fog: what a producer published, else a scene Environment's own fog
+    /// (taken over: its density moves here, the Environment keeps only the sky's share).
+    fn frame_post_fog(&mut self, cam_env: Option<Gd<Environment>>) -> Option<super::post_fog::Fog> {
+        use super::post_fog;
+        if !self.post_fog_registered {
+            return None;
+        }
+        if let Some(f) = post_fog::take() {
+            return Some(f);
+        }
+        let env = cam_env.or_else(|| self.base().get_viewport().and_then(|v| v.find_world_3d()).and_then(|w| w.get_environment()));
+        if let Some(mut e) = env
+            && self.adopted_fog.as_ref().is_none_or(|(a, _)| *a != e)
+            && let Some(f) = post_fog::from_environment(&e)
+            && f.density > 0.0
+        {
+            let own = post_fog::Fog { color: e.get_fog_light_color(), ..f };
+            post_fog::grade_sky(&mut e, Some(own));
+            self.adopted_fog = Some((e, f));
+        }
+        self.adopted_fog.as_ref().map(|(_, f)| *f)
     }
 
     fn teardown(&mut self) {
@@ -1004,6 +1076,7 @@ impl PixelRenderer {
         self.push_object_defaults();
         let outline_tex = self.outline_texture();
         let env = cam.get_environment();
+        let fog = self.frame_post_fog(env.clone());
         let attrs = cam.get_attributes();
         let (near, far) = (cam.get_near(), cam.get_far());
         let fov = cam.get_fov();
@@ -1111,6 +1184,14 @@ impl PixelRenderer {
         m.param("saturation", &self.saturation.to_variant());
         m.param("contrast", &self.contrast.to_variant());
         m.param("brightness", &self.brightness.to_variant());
+        let fog = fog.filter(|f| f.density > 1e-6);
+        super::post_fog::set_current(fog);
+        m.param("fog_enabled", &fog.is_some().to_variant());
+        if let Some(f) = fog {
+            m.param("fog_color", &f.color.to_variant());
+            m.param("fog_density", &f.density.to_variant());
+            m.param("fog_dither", &self.post_fog_dither.to_variant());
+        }
         m.param("debug_view", &self.debug_view.to_variant());
         m.param("rays_enabled", &god_rays.to_variant());
         if god_rays {

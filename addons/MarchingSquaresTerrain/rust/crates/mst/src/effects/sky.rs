@@ -217,6 +217,9 @@ impl PixelSky {
             m.param("opacity", &opacity.to_variant());
             m.param("cloud_color", &deck.to_variant());
             m.param("shade_color", &deck_shade.to_variant());
+            // PixelRenderer post fog: the deck fogs itself (render/post_fog.rs).
+            let fog = crate::render::post_fog::current().map_or(Color::from_rgba(0.0, 0.0, 0.0, 0.0), |f| Color::from_rgba(f.color.r, f.color.g, f.color.b, f.density));
+            m.param("post_fog", &fog.to_variant());
         }
     }
 
