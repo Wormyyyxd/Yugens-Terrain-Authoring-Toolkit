@@ -87,6 +87,9 @@ group_uniforms God_Rays;
 // crosses adds the sunlight let through the cloud gaps at that point. Distances are metres
 // (Stable3D's centimetre defaults / 100). PixelRenderer drives every uniform.
 uniform bool rays_enabled = false;
+/// Add the rays after the palette (and fog) instead of before it: the palette snapped faint
+/// shafts back to the surface's own colour, so at the default strength they barely showed.
+uniform bool rays_over_palette = true;
 /// RayColor (GodRayUseSunColor off) or the sun hue (on).
 uniform vec4 ray_color : source_color = vec4(1.0, 0.984, 0.266, 1.0);
 /// RayStrength x Global Brightness of the Stable3D default material instance (0.01 x 2),
@@ -527,6 +530,18 @@ float rays(ivec2 s, float depth) {
 	return m;
 }
 
+// Stable3D: outputColor += rayTint * (godrayMask * RayStrength), added in linear light like UE's
+// scene colour (the colour texture here holds sRGB values).
+vec3 add_rays(vec3 col, ivec2 c0, Meta m0) {
+	float r = rays(c0, m0.obj ? m0.depth : 1e6) * ray_strength * (1.0 - pt_night) * smoothstep(0.5, 1.0, pt_sun_light); // rays fade with the sun through sunset / blue hour (PixelDayNight)
+	// UE's filmic tonemapper rolls the HDR sum off towards white; this LDR buffer has no
+	// headroom, so the add is a linear-light screen (a + b - ab): the same lift in the shadows,
+	// no clipped washout on bright ground.
+	vec3 lin = clamp(pow(max(col, vec3(0.0)), vec3(2.2)), 0.0, 1.0);
+	vec3 add = clamp(ray_color.rgb * r, 0.0, 1.0);
+	return pow(lin + add * (1.0 - lin), vec3(1.0 / 2.2));
+}
+
 void fragment() {
 	ivec2 p = ivec2(floor(UV * vec2(out_size)));
 	ivec2 s = p + margin;
@@ -569,16 +584,8 @@ void fragment() {
 			jitter = BAYER4[pmod(l.y, 4) * 4 + pmod(l.x, 4)] / 16.0;
 		}
 
-		if (rays_enabled) {
-			// Stable3D: outputColor += rayTint * (godrayMask * RayStrength), added in linear
-			// light like UE's scene colour (the colour texture here holds sRGB values).
-			float r = rays(c0, m0.obj ? m0.depth : 1e6) * ray_strength * (1.0 - pt_night) * smoothstep(0.5, 1.0, pt_sun_light); // rays fade with the sun through sunset / blue hour (PixelDayNight)
-			// UE's filmic tonemapper rolls the HDR sum off towards white; this LDR buffer
-			// has no headroom, so the add is a linear-light screen (a + b - ab): the same
-			// lift in the shadows, no clipped washout on bright ground.
-			vec3 lin = clamp(pow(max(col, vec3(0.0)), vec3(2.2)), 0.0, 1.0);
-			vec3 add = clamp(ray_color.rgb * r, 0.0, 1.0);
-			col = pow(lin + add * (1.0 - lin), vec3(1.0 / 2.2));
+		if (rays_enabled && !rays_over_palette) {
+			col = add_rays(col, c0, m0);
 		}
 
 		float lum = dot(col, vec3(0.299, 0.587, 0.114));
@@ -603,6 +610,11 @@ void fragment() {
 			} else {
 				col = mix(col, fog_color.rgb, f);
 			}
+		}
+		if (rays_enabled && rays_over_palette) {
+			// Light in the air, like the fog: added after the palette so faint shafts are not
+			// snapped back to the surface's own palette colour.
+			col = add_rays(col, c0, m0);
 		}
 		COLOR = vec4(clamp(col, 0.0, 1.0), 1.0);
 	}

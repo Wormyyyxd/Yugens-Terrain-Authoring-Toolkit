@@ -27,7 +27,8 @@ debug builds of the libraries, and the demo scene `demo/hex_island.tscn`.
 | `857a984` | Terrain LOD | Keep chunks at full detail for 3 s; keep collision when dropping detail |
 | `0027345` | Weather | Revert `596d005` (it moved the grey problem around instead of fixing it) |
 | `d0011ab` | Pixel renderer | Draw fog after the palette, so fogged things keep their colour |
-| *(next)* | Grass / props | Grass and trees sway with the weather's wind |
+| `fefa2f6` | Grass / props | Grass and trees sway with the weather's wind |
+| *(next)* | Pixel renderer | Add god rays after the palette, so they actually show |
 
 Each commit that touches Rust source also updates the matching prebuilt debug library in `bin/`,
 because upstream ships those libraries and the demo runs from them without a Rust build.
@@ -381,7 +382,7 @@ the palette off (a hazy but clearly coloured image) and on (flat grey).
 
 ---
 
-## Grass and trees sway with the weather's wind — "Make grass and props sway with the weather's wind"
+## Grass and trees sway with the weather's wind — `fefa2f6`
 
 **Problem.** Playtest wish: the wind should move the grass and the trees.
 
@@ -410,6 +411,30 @@ a few centimetres, below one pixel at the default zoom, and also ignored the wea
 
 **Verified.** Rendered the demo in Clear and in Storm: the share of plant-area pixels that
 change over 0.2 s doubles from 6.3 % to 12.4 %. No shader compile errors.
+
+---
+
+## Add god rays after the palette — "Add god rays after the palette so faint shafts show"
+
+**Problem.** Playtest: no visible god rays, even when changing their colour or settings.
+
+**Cause.** The rays were computed correctly (the renderer's *God Rays* debug view shows clear
+diagonal light sheets), but they were added to the colour **before** the palette snap. At the
+default strength they brighten a surface only a little, and the palette rounded most of that
+back to the surface's own palette colour: with the palette on they changed 38 % of pixels by
++18.6 RGB on average, against +36 with the palette off. Colour changes were rounded away too.
+
+**Change.** New `PixelRenderer.rays_over_palette` (on by default) and the matching shader
+uniform: the rays are added after the palette and the post fog (light in the air, like the
+fog), in a shared `add_rays()` function. Off restores the previous order.
+
+**Files.** `addons/MarchingSquaresTerrain/shaders/pixel_resolve.gdshader`,
+`addons/MarchingSquaresTerrain/rust/crates/mst/src/render/renderer.rs`.
+
+**Verified.** Same view, rays off vs on at the default strength: 81.6 % of pixels brightened by
++23.5 RGB on average (was 38.1 % / +18.6), and ray colour / strength changes now show. At the
+default strength the rays read as a warm glow with faint diagonal banding; distinct shafts need a
+higher `ray_strength` or a view towards the sun through cloud gaps (not retuned here).
 
 ---
 

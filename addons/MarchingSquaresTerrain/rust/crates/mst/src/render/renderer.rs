@@ -325,6 +325,11 @@ pub struct PixelRenderer {
     /// side-on views keep the shafts at a comparable strength instead of washing out.
     #[export(range = (0.0, 10.0, 0.01, or_greater))]
     ray_adaptation: f32,
+    /// Add the rays after the palette and fog (light in the air, like the fog) instead of
+    /// before the palette, where faint shafts were snapped back to the surface's own palette
+    /// colour and barely showed at the default strength.
+    #[export]
+    rays_over_palette: bool,
 
     #[export_group(name = "Advanced")]
     /// Render layer reserved for the metadata camera (pixelized geometry is put on it).
@@ -500,6 +505,7 @@ impl INode for PixelRenderer {
             ray_day_cycle: true,
             ray_dawn_dusk: 0.0,
             ray_adaptation: RAY_ADAPTATION,
+            rays_over_palette: true,
             debug_view: 0,
             warm_up_shaders: true,
             warmup: Default::default(),
@@ -1194,6 +1200,7 @@ impl PixelRenderer {
         }
         m.param("debug_view", &self.debug_view.to_variant());
         m.param("rays_enabled", &god_rays.to_variant());
+        m.param("rays_over_palette", &self.rays_over_palette.to_variant());
         if god_rays {
             m.param("ray_color", &ray_tint.to_variant());
             m.param("ray_strength", &(STABLE3D_RAY_STRENGTH * LDR_RAY_CALIBRATION * self.ray_strength).to_variant());
