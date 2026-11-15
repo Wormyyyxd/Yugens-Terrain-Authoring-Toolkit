@@ -279,7 +279,17 @@ impl PixelSky {
                 let deck_y = if self.deck_clearance > 0.0 { self.cloud_height.max(t.origin.y + self.deck_clearance) } else { self.cloud_height };
                 let hit = if fwd.y.abs() > 1e-3 { (deck_y - t.origin.y) / fwd.y } else { -1.0 };
                 let p = if hit > 0.0 { t.origin + fwd * hit.min(self.deck_size) } else { t.origin };
-                Vector3::new(p.x, deck_y, p.z)
+                // Shift towards where the view meets the deck, but keep the camera well inside it:
+                // a view just above the horizon meets the deck hundreds of metres away, and
+                // centring it there (up to deck_size) pushed the whole deck past the camera's
+                // far plane, so the clouds vanished at one tilt (and camera height). The clouds
+                // are sampled by world XZ, so moving the mesh never moves them.
+                let mut shift = Vector2::new(p.x - t.origin.x, p.z - t.origin.z);
+                let max_shift = self.deck_size.max(1.0) * 0.25;
+                if shift.length() > max_shift {
+                    shift = shift.normalized() * max_shift;
+                }
+                Vector3::new(t.origin.x + shift.x, deck_y, t.origin.z + shift.y)
             }
             None => {
                 let p = self.base().get_global_position();

@@ -29,7 +29,8 @@ debug builds of the libraries, and the demo scene `demo/hex_island.tscn`.
 | `d0011ab` | Pixel renderer | Draw fog after the palette, so fogged things keep their colour |
 | `fefa2f6` | Grass / props | Grass and trees sway with the weather's wind |
 | `c3086f0` | Pixel renderer | Add god rays after the palette, so they actually show |
-| *(next)* | Sky | Keep the cloud deck above the camera (no vanishing / smeared clouds) |
+| `f9989a2` | Sky | Keep the cloud deck above the camera (no smeared / covering clouds when zoomed out high) |
+| *(next)* | Sky | Keep the camera inside the cloud deck (clouds vanished when tilting up close) |
 
 Each commit that touches Rust source also updates the matching prebuilt debug library in `bin/`,
 because upstream ships those libraries and the demo runs from them without a Rust build.
@@ -439,9 +440,11 @@ higher `ray_strength` or a view towards the sun through cloud gaps (not retuned 
 
 ---
 
-## Keep the cloud deck above the camera — "Keep the cloud deck above the camera"
+## Keep the cloud deck above the camera — `f9989a2`
 
-**Problem.** Playtest: at a certain camera height the clouds disappeared.
+**Problem.** Found while investigating the playtest report "clouds disappear at a certain camera
+height" (that report turned out to be a different bug, fixed in the next section): zoomed far
+out with the camera near or above 40 m, the clouds smeared across the view or covered the island.
 
 **Cause.** `PixelSky`'s visible cloud deck is a flat sheet at `cloud_height` (40 m) that follows
 the camera. A camera near 40 m (zoomed out, tilted down) sees it **edge-on**, so it collapses to
@@ -459,6 +462,31 @@ still use `cloud_height`, and the deck shows the same clouds (they are sampled b
 
 **Verified.** Rendered at 100 m zoom with the camera at 29, 39 and 48 m: before, normal / white
 smear over the island / clouds blanketing the island; after, a normal sky in all three.
+
+---
+
+## Keep the camera inside the cloud deck — "Keep the camera inside the cloud deck"
+
+**Problem.** Playtest: zoomed in close and tilting the camera up towards the sky, the clouds
+vanished at one very specific camera height.
+
+**Cause.** `PixelSky::follow_camera` centres the deck where the view ray meets the deck,
+limited only to `deck_size` away. Tilted just above the horizon (1–4° up, which with the orbit
+camera is one narrow band of camera heights around 5 m), that point is hundreds of metres ahead,
+so the deck was centred 500–900 m away and its near edge lay beyond the camera's 400 m far plane:
+no clouds at all. Level or tilted further up, the centre was close and the clouds came back.
+
+**Change.** The deck's horizontal shift towards the view point is capped at a quarter of
+`deck_size`, so the camera always stays well inside the deck (the demo's 900 m deck then reaches
+at least 675 m ahead). The clouds are sampled by world XZ, so moving the mesh never moves the
+clouds themselves; nothing else changes.
+
+**Files.** `addons/MarchingSquaresTerrain/rust/crates/mst/src/effects/sky.rs`; rebuilt
+`addons/MarchingSquaresTerrain/bin/marching_squares_terrain.dll`.
+
+**Verified.** Swept the camera tilt from 10° up to 10° down at 13 m and 8 m zoom, counting
+cloud pixels in the sky: at 1–2° up they went from about 190 to about 17,000 (in line with the
+neighbouring tilts); every other tilt is unchanged.
 
 ---
 
