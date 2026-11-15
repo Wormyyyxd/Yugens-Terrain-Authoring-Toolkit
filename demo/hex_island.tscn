@@ -487,7 +487,6 @@ process_priority = 10000
 layer = 100
 
 [node name="Weather" type="PixelWeather" parent="." unique_id=1500700001 node_paths=PackedStringArray("sun", "environment")]
-fog_focus_distance = 13.0
 sun = NodePath("../Sun")
 environment = NodePath("../WorldEnvironment")
 process_priority = -20

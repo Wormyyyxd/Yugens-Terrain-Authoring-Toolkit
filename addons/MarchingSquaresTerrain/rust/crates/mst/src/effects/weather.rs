@@ -457,12 +457,6 @@ pub struct PixelWeather {
     /// Overall weather intensity (0 = always clear).
     #[export(range = (0.0, 1.0, 0.01))]
     strength: f32,
-    /// Third-person cameras: weather fog is thinned for a camera farther than this (m) from its
-    /// subject, so the subject keeps the fog it has at this distance and zooming out does not
-    /// bury the scene in fog (the fog is camera-distance based). The subject distance is the
-    /// camera's `pixel_snap_distance` meta (see PixelRenderer). 0 = off.
-    #[export(range = (0.0, 200.0, 0.5, or_greater))]
-    fog_focus_distance: f32,
     /// Custom weather states. A preset named like a built-in replaces it; others are reachable
     /// through `set_weather(name)`.
     #[export]
@@ -602,7 +596,6 @@ impl INode3D for PixelWeather {
             transition_seconds: 6.0,
             ground_seconds: 15.0,
             strength: 1.0,
-            fog_focus_distance: 0.0,
             presets: Array::new(),
             sun: None,
             environment: None,
@@ -707,8 +700,7 @@ impl INode3D for PixelWeather {
         let snow_target = if self.snow_enabled { 1.0 } else { 0.0 };
         let snow_step = if self.transition_seconds <= 0.0 { 1.0 } else { dt / self.transition_seconds };
         self.snow_on += (snow_target - self.snow_on).clamp(-snow_step, snow_step);
-        let mut eff = self.effective();
-        eff.fog_density *= self.fog_zoom_scale();
+        let eff = self.effective();
 
         // Ground follows its target at a fixed rate (soaks / dries); snow builds up while it
         // falls and melts back once it stops (wetting the ground while it melts).
@@ -771,25 +763,6 @@ impl PixelWeather {
     fn environment_node(&mut self) -> Option<Gd<WorldEnvironment>> {
         let owner = self.to_gd().upcast::<Node>();
         self.env_ref.resolve(&owner, &self.environment)
-    }
-
-    /// `fog_focus_distance` / the camera's subject distance (at most 1). Exponential fog at
-    /// distance d is 1 - exp(-density * d), so scaling the density by this keeps the fog at the
-    /// subject what it is at `fog_focus_distance`; farther scenery still fades into it.
-    fn fog_zoom_scale(&self) -> f32 {
-        if self.fog_focus_distance <= 0.0 {
-            return 1.0;
-        }
-        let node = self.to_gd().upcast::<Node>();
-        let Some(cam) = active_camera(&node) else { return 1.0 };
-        if !cam.has_meta("pixel_snap_distance") {
-            return 1.0;
-        }
-        let d = cam.get_meta("pixel_snap_distance").try_to::<f32>().unwrap_or(0.0);
-        if d <= self.fog_focus_distance {
-            return 1.0;
-        }
-        self.fog_focus_distance / d
     }
 
     /// Looks a weather up by name: custom presets first, then the built-ins.

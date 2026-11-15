@@ -23,8 +23,9 @@ debug builds of the libraries, and the demo scene `demo/hex_island.tscn`.
 | `d0d21c8` | Terrain shaders | Wet ground keeps its colour instead of turning grey |
 | `9546014` | Terrain LOD | Spread distant-LOD chunk rebuilds over frames (no orbit stutter) |
 | `15d3a0f` | Pixel renderer | Warm up the shadow-off variant too (no freeze at the first night) |
-| `596d005` | Weather | Thin weather fog as a third-person camera zooms out |
-| *(next)* | Terrain LOD | Keep chunks at full detail for 3 s; keep collision when dropping detail |
+| ~~`596d005`~~ | Weather | ~~Thin weather fog as a third-person camera zooms out~~ — **reverted** by the next row |
+| `857a984` | Terrain LOD | Keep chunks at full detail for 3 s; keep collision when dropping detail |
+| *(next)* | Weather | Revert `596d005` (it moved the grey problem around instead of fixing it) |
 
 Each commit that touches Rust source also updates the matching prebuilt debug library in `bin/`,
 because upstream ships those libraries and the demo runs from them without a Rust build.
@@ -251,7 +252,12 @@ the sun's shadow flipped.
 
 ---
 
-## Thin weather fog as a third-person camera zooms out — `596d005`
+## Thin weather fog as a third-person camera zooms out — `596d005` (REVERTED)
+
+> **Reverted** in "Revert fog zoom scaling". Playtesting showed it only moved the problem: zoomed
+> out the island looked right, but zoomed back in, distant objects still turned flat grey. The
+> real issue is that fogged colours come out grey after the pixel pass at any zoom, not how much
+> fog there is. `fog_focus_distance` no longer exists; nothing below is in the current build.
 
 **Problem.** In rain (also Foggy, Cloudy, Storm), zooming the camera out turned the whole island
 grey.
@@ -280,7 +286,7 @@ the rain and cloud cover through less haze.
 
 ---
 
-## Keep LOD chunks full for 3 s and keep their collision — "Cut distant-LOD churn while orbiting"
+## Keep LOD chunks full for 3 s and keep their collision — `857a984`
 
 **Problem.** After `9546014` the big spikes were gone, but orbiting zoomed out still dropped the
 frame rate, especially with a fast mouse drag.
@@ -301,8 +307,8 @@ the cost of a flip.
   full detail, rebuild collision.
 
 **Files.** `addons/MarchingSquaresTerrain/rust/crates/mst/src/terrain/node.rs`; rebuilt
-`addons/MarchingSquaresTerrain/bin/marching_squares_terrain.dll` (this build also contains
-`15d3a0f` and `596d005`).
+`addons/MarchingSquaresTerrain/bin/marching_squares_terrain.dll` (this build also contained
+`15d3a0f` and the since-reverted `596d005`; the revert rebuilt it without the fog change).
 
 **Verified.** Scripted orbit with real input events (mouse drag at about 360°/s, arrow keys at
 120°/s), 5 s each, two runs:
