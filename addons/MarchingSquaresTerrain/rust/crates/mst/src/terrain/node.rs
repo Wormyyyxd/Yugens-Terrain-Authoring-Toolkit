@@ -33,6 +33,10 @@ mod overlay;
 // Storage modes, importer and static bake (same type, separate file).
 #[path = "node_storage.rs"]
 mod node_storage;
+/// Distant-LOD chunk rebuilds per frame (about 1 ms each in the demo): spreads the 20-60 chunks
+/// an orbiting far camera flips per LOD tick over a few frames instead of one hitch.
+const LOD_REBUILDS_PER_FRAME: usize = 6;
+
 // GPU-instanced HexPrism columns (`hex_edge_instanced`).
 #[path = "hex_columns.rs"]
 mod hex_columns;
@@ -424,6 +428,9 @@ pub struct MarchingSquaresTerrain {
     save_pending: BTreeSet<IVec2>,
     /// Chunks meshed at low detail (distant LOD ring); their scatter props are hidden.
     pub(super) lod_low: HashSet<IVec2>,
+    /// Chunks whose detail flipped (in or out of `lod_low`) and still need a rebuild; drained a
+    /// few per frame (`drain_lod_pending`).
+    lod_pending: HashSet<IVec2>,
     lod_timer: f64,
     /// This terrain published `pt_lod_fade` (cleared when its LOD turns off).
     lod_fade_published: bool,
@@ -496,6 +503,7 @@ impl INode3D for MarchingSquaresTerrain {
             lod_focus: None,
             lod_in_editor: false,
             lod_low: HashSet::new(),
+            lod_pending: HashSet::new(),
             grass_water: WaterCull::default(),
             surface: Default::default(),
             revision: 0,
@@ -744,6 +752,7 @@ impl MarchingSquaresTerrain {
         if self.need_instances {
             self.apply_instance_settings();
         }
+        self.drain_lod_pending();
         if !self.dirty.is_empty() {
             let _p = crate::prof::scope("upd.flush");
             self.flush();
@@ -1550,12 +1559,43 @@ impl MarchingSquaresTerrain {
         if low == self.lod_low {
             return;
         }
+        // Queue the flipped chunks instead of dirtying them all at once: an orbiting camera far
+        // from the focus sweeps the full-detail segment across the map and flips 20-60 chunks
+        // per LOD tick (about 1 ms of rebuild each), which hitched every tick when they were all
+        // rebuilt in one frame. `drain_lod_pending` rebuilds a few per frame. A chunk that flips
+        // back before it was rebuilt already has the right mesh again, so it leaves the queue.
         for c in self.lod_low.symmetric_difference(&low) {
-            if self.store.has_chunk(*c) {
-                self.dirty.insert(*c);
+            if self.store.has_chunk(*c) && !self.lod_pending.remove(c) {
+                self.lod_pending.insert(*c);
             }
         }
         self.lod_low = low;
+    }
+
+    /// Moves up to [`LOD_REBUILDS_PER_FRAME`] queued LOD chunks (nearest to the LOD focus
+    /// first) into the dirty set for this frame's flush.
+    fn drain_lod_pending(&mut self) {
+        // Chunks dirtied for another reason are rebuilt (at their current detail) anyway.
+        if !self.dirty.is_empty() {
+            let dirty = &self.dirty;
+            self.lod_pending.retain(|c| !dirty.contains(c));
+        }
+        if self.lod_pending.is_empty() {
+            return;
+        }
+        let mut queued: Vec<IVec2> = self.lod_pending.iter().copied().collect();
+        if queued.len() > LOD_REBUILDS_PER_FRAME {
+            let focus = v2(self.lod_fade.x, self.lod_fade.y);
+            let local = self.global_to_local(Vector3::new(focus.x, 0.0, focus.y));
+            let focus = v2(local.x, local.z);
+            let cfg = &self.store.config;
+            queued.sort_by(|a, b| (cfg.chunk_center_pos(*a) - focus).length_squared().total_cmp(&(cfg.chunk_center_pos(*b) - focus).length_squared()));
+            queued.truncate(LOD_REBUILDS_PER_FRAME);
+        }
+        for c in queued {
+            self.lod_pending.remove(&c);
+            self.dirty.insert(c);
+        }
     }
 
     fn global_to_local(&self, p: Vector3) -> Vector3 {

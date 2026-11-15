@@ -20,7 +20,8 @@ debug builds of the libraries, and the demo scene `demo/hex_island.tscn`.
 | `3c2dc04` | Pixel renderer | Warm up effect shaders while the scene loads |
 | `9518435` | Docs | Add this file |
 | `3a5c3ae` | Demo scene | Fewer fireflies at the camp |
-| *(next)* | Terrain shaders | Wet ground keeps its colour instead of turning grey |
+| `d0d21c8` | Terrain shaders | Wet ground keeps its colour instead of turning grey |
+| *(next)* | Terrain LOD | Spread distant-LOD chunk rebuilds over frames (no orbit stutter) |
 
 Each commit that touches Rust source also updates the matching prebuilt debug library in `bin/`,
 because upstream ships those libraries and the demo runs from them without a Rust build.
@@ -141,7 +142,7 @@ live in the F3 tuner (Effects → Fireflies).
 
 ---
 
-## Wet ground keeps its colour — "Keep wet ground's colour instead of greying it"
+## Wet ground keeps its colour — `d0d21c8`
 
 **Problem.** In rain, grass-covered ground and paths turned grey-purple instead of a darker,
 wetter version of themselves.
@@ -183,6 +184,38 @@ the same pixels dry and wet:
 
 In the final image, foreground grass ground stays green and dirt turns a wet brown. No shader
 compile errors.
+
+---
+
+## Spread distant-LOD chunk rebuilds over frames — "Spread distant-LOD chunk rebuilds over frames"
+
+**Problem.** Zoomed fully out (100 m), turning the camera quickly stuttered.
+
+**Cause.** Not rendering and not the camera (it moved smoothly every frame). The terrain's
+distant LOD re-evaluates every 0.2 s which chunks get the low-detail mesh, keeping full detail
+along the segment from the LOD focus (the player) to the camera. At 13 m that segment barely
+moves; at 100 m an orbiting camera sweeps it across the island, so each tick flipped 20–56 of
+the 295 chunks between low and full detail. All of them were rebuilt (mesh, collision, grass
+regions; about 1 ms each, measured with the crate's `MST_PROF` scopes) in one frame: a 25–55 ms
+hitch five times a second.
+
+**Change.** `set_lod_chunks` queues flipped chunks in `lod_pending` instead of marking them
+dirty. Each frame `drain_lod_pending` moves at most `LOD_REBUILDS_PER_FRAME` (6) of them,
+nearest to the LOD focus first, into the dirty set. A chunk that flips back before it was
+rebuilt leaves the queue (its mesh is right again), and chunks dirtied for any other reason
+(edits, reloads) are rebuilt immediately as before.
+
+**Files.** `addons/MarchingSquaresTerrain/rust/crates/mst/src/terrain/node.rs`; rebuilt
+`addons/MarchingSquaresTerrain/bin/marching_squares_terrain.dll`.
+
+**Verified.** Scripted orbit with real input events (arrow-key action), 5 s each, two runs:
+
+| | Before | After |
+|---|---|---|
+| Orbit at 13 m, worst frame | 18–19 ms | 15.5–17 ms |
+| Orbit at 100 m, worst frame | 54–55 ms | 17.4–17.6 ms |
+| Frames over 25 ms at 100 m | 10–11 | 0 |
+| Snap zoom 13 → 100 m | 56–57 ms | under 25 ms |
 
 ---
 
