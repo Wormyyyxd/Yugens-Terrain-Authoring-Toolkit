@@ -26,7 +26,7 @@ debug builds of the libraries, and the demo scene `demo/hex_island.tscn`.
 | ~~`596d005`~~ | Weather | ~~Thin weather fog as a third-person camera zooms out~~ — **reverted** by the next row |
 | `857a984` | Terrain LOD | Keep chunks at full detail for 3 s; keep collision when dropping detail |
 | `0027345` | Weather | Revert `596d005` (it moved the grey problem around instead of fixing it) |
-| *(next)* | Pixel renderer | Draw fog after the palette, so fogged things keep their colour |
+| `d0011ab` | Pixel renderer | Draw fog after the palette, so fogged things keep their colour |
 
 Each commit that touches Rust source also updates the matching prebuilt debug library in `bin/`,
 because upstream ships those libraries and the demo runs from them without a Rust build.
@@ -327,7 +327,7 @@ reproduce in two repeats (with this build and with the previous one).
 
 ---
 
-## Draw fog after the palette — "Draw fog after the palette so fogged surfaces keep their colour"
+## Draw fog after the palette — `d0011ab`
 
 **Problem.** In Rain, Foggy, Cloudy and Storm, fogged ground, cliffs and paths turned flat grey,
 at any zoom (worse zoomed out, where everything is far from the camera). The reverted `596d005`
