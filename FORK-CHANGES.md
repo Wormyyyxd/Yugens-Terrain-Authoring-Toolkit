@@ -23,7 +23,8 @@ debug builds of the libraries, and the demo scene `demo/hex_island.tscn`.
 | `d0d21c8` | Terrain shaders | Wet ground keeps its colour instead of turning grey |
 | `9546014` | Terrain LOD | Spread distant-LOD chunk rebuilds over frames (no orbit stutter) |
 | `15d3a0f` | Pixel renderer | Warm up the shadow-off variant too (no freeze at the first night) |
-| *(next)* | Weather | Thin weather fog as a third-person camera zooms out |
+| `596d005` | Weather | Thin weather fog as a third-person camera zooms out |
+| *(next)* | Terrain LOD | Keep chunks at full detail for 3 s; keep collision when dropping detail |
 
 Each commit that touches Rust source also updates the matching prebuilt debug library in `bin/`,
 because upstream ships those libraries and the demo runs from them without a Rust build.
@@ -250,7 +251,7 @@ the sun's shadow flipped.
 
 ---
 
-## Thin weather fog as a third-person camera zooms out — "Thin weather fog as a third-person camera zooms out"
+## Thin weather fog as a third-person camera zooms out — `596d005`
 
 **Problem.** In rain (also Foggy, Cloudy, Storm), zooming the camera out turned the whole island
 grey.
@@ -276,6 +277,46 @@ unchanged.
 **Verified.** Rain rendered at 13 m and 100 m zoom, setting off vs on: at 13 m the frames match;
 at 100 m the island keeps its green and sand instead of turning grey, and the sea and sky show
 the rain and cloud cover through less haze.
+
+---
+
+## Keep LOD chunks full for 3 s and keep their collision — "Cut distant-LOD churn while orbiting"
+
+**Problem.** After `9546014` the big spikes were gone, but orbiting zoomed out still dropped the
+frame rate, especially with a fast mouse drag.
+
+**Cause.** The distant LOD depends on the view (it keeps full detail between the player and the
+camera), so a fast orbit keeps chunks flipping and the rebuild queue stayed full at 6 chunks per
+frame. Many flips were chunks dropped to low detail the moment they left the zone and needed
+again when the camera swung back. Also, a chunk's low-detail mesh became its **collision** too,
+so collision far from the player changed with the camera, and rebuilding it was about a third of
+the cost of a flip.
+
+**Change.**
+- **Time hysteresis.** A chunk only returns to low detail after the LOD has not needed it at
+  full detail for `LOD_KEEP_SECONDS` (3 s), so swinging back and forth reuses the chunks it just
+  built.
+- **Collision kept when dropping detail.** A chunk that drops to low detail purely because of
+  the LOD keeps its existing (finer) collision; only rebuilds for any other reason, and rises to
+  full detail, rebuild collision.
+
+**Files.** `addons/MarchingSquaresTerrain/rust/crates/mst/src/terrain/node.rs`; rebuilt
+`addons/MarchingSquaresTerrain/bin/marching_squares_terrain.dll` (this build also contains
+`15d3a0f` and `596d005`).
+
+**Verified.** Scripted orbit with real input events (mouse drag at about 360°/s, arrow keys at
+120°/s), 5 s each, two runs:
+
+| | FPS before | FPS after | Frames over 10 ms, before → after |
+|---|---|---|---|
+| Mouse drag, 100 m | 125 | 206–226 | 247 → 25–27 |
+| Arrow keys, 100 m | 203 | 214–234 | 90 → 8–11 |
+| Mouse drag, 13 m | 208 | 235–239 | 62 → 4–6 |
+| Arrow keys, 13 m | 231 | 236–240 | 27 → 0 |
+
+Cold-cache regression run of the fire / weather sequence, the night jumps and the orbits with
+this build: no frame over 25 ms except one 323 ms frame after Snow in a single run, which did not
+reproduce in two repeats (with this build and with the previous one).
 
 ---
 

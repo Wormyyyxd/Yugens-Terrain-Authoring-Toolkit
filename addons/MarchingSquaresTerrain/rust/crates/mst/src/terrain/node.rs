@@ -36,6 +36,8 @@ mod node_storage;
 /// Distant-LOD chunk rebuilds per frame (about 1 ms each in the demo): spreads the 20-60 chunks
 /// an orbiting far camera flips per LOD tick over a few frames instead of one hitch.
 const LOD_REBUILDS_PER_FRAME: usize = 6;
+/// Seconds a chunk stays at full detail after the LOD last needed it (see `apply_lod_view`).
+const LOD_KEEP_SECONDS: f64 = 3.0;
 
 // GPU-instanced HexPrism columns (`hex_edge_instanced`).
 #[path = "hex_columns.rs"]
@@ -431,6 +433,11 @@ pub struct MarchingSquaresTerrain {
     /// Chunks whose detail flipped (in or out of `lod_low`) and still need a rebuild; drained a
     /// few per frame (`drain_lod_pending`).
     lod_pending: HashSet<IVec2>,
+    /// When each chunk was last needed at full detail (seconds); it may drop to low detail
+    /// [`LOD_KEEP_SECONDS`] later.
+    lod_needed_at: HashMap<IVec2, f64>,
+    /// Chunks of the current flush that only drop to low detail: their collision is kept.
+    lod_keep_collision: HashSet<IVec2>,
     lod_timer: f64,
     /// This terrain published `pt_lod_fade` (cleared when its LOD turns off).
     lod_fade_published: bool,
@@ -504,6 +511,8 @@ impl INode3D for MarchingSquaresTerrain {
             lod_in_editor: false,
             lod_low: HashSet::new(),
             lod_pending: HashSet::new(),
+            lod_needed_at: HashMap::new(),
+            lod_keep_collision: HashSet::new(),
             grass_water: WaterCull::default(),
             surface: Default::default(),
             revision: 0,
@@ -968,6 +977,9 @@ impl MarchingSquaresTerrain {
         if coords.is_empty() {
             return;
         }
+        // Only this flush's own LOD drops may keep their collision (see `drain_lod_pending`).
+        let keep = std::mem::take(&mut self.lod_keep_collision);
+        self.lod_keep_collision = coords.iter().copied().filter(|c| keep.contains(c)).collect();
         // Catch-all: whatever dirtied these chunks, their surfaces are re-derived from the store.
         self.surface.invalidate_chunks(&self.store, &coords);
         self.revision += 1;
@@ -1155,9 +1167,10 @@ impl MarchingSquaresTerrain {
         self.ensure_nodes(b.coord);
         let faces: PackedVector3Array = b.arrays.collision_faces.iter().map(|p| Vector3::new(p[0], p[1], p[2])).collect();
         self.set_chunk_mesh(b.coord, if b.columns { b.render } else { Some(b.arrays) });
-        let _p = crate::prof::scope("apply.collision");
-        self.set_chunk_collision(b.coord, faces);
-        drop(_p);
+        if !self.lod_keep_collision.remove(&b.coord) {
+            let _p = crate::prof::scope("apply.collision");
+            self.set_chunk_collision(b.coord, faces);
+        }
         // Grass blades (quads with their bottom at the instance origin), drawn by the region.
         let mut buf = Vec::with_capacity(b.grass.len() * batches::GRASS_STRIDE);
         for g in &b.grass {
@@ -1538,7 +1551,19 @@ impl MarchingSquaresTerrain {
         let cfg = &self.store.config;
         // Half a chunk radius of hysteresis.
         let radius = cfg.chunk_outline(iv2(0, 0)).first().map(|p| (*p - cfg.chunk_center_pos(iv2(0, 0))).length()).unwrap_or(0.0);
-        let low = cfg.lod_low_chunks(self.store.chunks.keys().copied(), v2(local.x, local.z), v2(local_eye.x, local_eye.z), self.lod_distance, radius * 0.5, &self.lod_low);
+        let want = cfg.lod_low_chunks(self.store.chunks.keys().copied(), v2(local.x, local.z), v2(local_eye.x, local_eye.z), self.lod_distance, radius * 0.5, &self.lod_low);
+        // Time hysteresis: a chunk only drops back to low detail once it has not been needed at
+        // full detail for LOD_KEEP_SECONDS. Orbiting the camera back and forth (or round) then
+        // re-uses the full chunks it just built instead of rebuilding them again and again.
+        let now = godot::classes::Time::singleton().get_ticks_msec() as f64 / 1000.0;
+        for c in self.store.chunks.keys() {
+            if !want.contains(c) {
+                self.lod_needed_at.insert(*c, now);
+            }
+        }
+        self.lod_needed_at.retain(|_, t| now - *t < LOD_KEEP_SECONDS);
+        let needed = &self.lod_needed_at;
+        let low: HashSet<IVec2> = want.into_iter().filter(|c| !needed.contains_key(c)).collect();
         self.set_lod_chunks(low);
         // Props / grass fade: a chunk turns low once its centre is past lod_distance (back to
         // full half a radius closer), so anything farther than lod_distance - 1.5 radius may
@@ -1595,6 +1620,11 @@ impl MarchingSquaresTerrain {
         for c in queued {
             self.lod_pending.remove(&c);
             self.dirty.insert(c);
+            // Dropping to low detail keeps the chunk's (finer) collision: rebuilding it was a
+            // third of the cost of a flip, and physics should not change with the camera.
+            if self.lod_low.contains(&c) {
+                self.lod_keep_collision.insert(c);
+            }
         }
     }
 
