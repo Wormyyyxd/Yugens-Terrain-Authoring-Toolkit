@@ -492,6 +492,9 @@ impl PixelDayNight {
             crate::set_changed!(sun, get_color, set_color, key.sun);
             crate::set_changed!(sun, get_param(Param::ENERGY), set_param(Param::ENERGY), key.sun_energy * self.sun_energy_scale + sun_extra);
             // Shadows fade out through the sunset instead of popping off (the moon casts none).
+            // Shadow on / off is a shader specialization in the Compatibility renderer; both
+            // variants are compiled while the scene loads (render/warmup.rs), otherwise the first
+            // dusk recompiled every visible material (a 5 s freeze on a cold shader cache).
             crate::set_changed!(sun, has_shadow, set_shadow, self.sun_shadows && elevation >= DUSK_FLOOR);
             let shadow = if elevation >= DUSK_FLOOR { smoothstep(DUSK_FLOOR, 0.02, elevation) } else { 0.0 };
             crate::set_changed!(sun, get_param(Param::SHADOW_OPACITY), set_param(Param::SHADOW_OPACITY), shadow);

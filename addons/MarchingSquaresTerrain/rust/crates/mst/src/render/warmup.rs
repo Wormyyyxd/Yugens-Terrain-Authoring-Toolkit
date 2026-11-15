@@ -15,15 +15,17 @@
 //! compiles then land in the loading frames instead of mid-game. Proxies are freed afterwards;
 //! nothing is visible (each covers far less than a pixel).
 //!
-//! Environment switches are specializations too (fog on / off recompiles every material), which
-//! no warm-up can cover: effects keep such switches fixed instead (see `day_night::grade_fog`).
+//! Light and environment switches are specializations too. Directional shadows on / off (the sun
+//! at dusk) are covered by flipping each directional light's shadow for the second warm-up frame
+//! and restoring it afterwards. Fog on / off is kept fixed by the effects instead (see
+//! `day_night::grade_fog`).
 
 use std::collections::HashSet;
 
 use godot::classes::geometry_instance_3d::ShadowCastingSetting;
 use godot::classes::light_3d::Param as LightParam;
 use godot::classes::multi_mesh::TransformFormat;
-use godot::classes::{Camera3D, GeometryInstance3D, Material, MeshInstance3D, MultiMesh, MultiMeshInstance3D, Node, Node3D, OmniLight3D, QuadMesh};
+use godot::classes::{Camera3D, DirectionalLight3D, GeometryInstance3D, Material, MeshInstance3D, MultiMesh, MultiMeshInstance3D, Node, Node3D, OmniLight3D, QuadMesh};
 use godot::prelude::*;
 
 use crate::util::*;
@@ -54,6 +56,10 @@ pub struct ShaderWarmup {
     root: Option<Gd<Node3D>>,
     /// Proxies drawn by the last run (for tests / diagnostics).
     count: usize,
+    /// Directional lights of the scene and their own `shadow_enabled`: flipped for one warm-up
+    /// frame (shadow on / off is a specialization too, and PixelDayNight switches the sun's
+    /// shadow off at dusk), then restored to these values.
+    lights: Vec<(Gd<DirectionalLight3D>, bool)>,
 }
 
 impl ShaderWarmup {
@@ -89,18 +95,36 @@ impl ShaderWarmup {
         if self.frame >= DRAW_FRAMES {
             self.clear();
             self.done = true;
+        } else if self.frame == 1 {
+            // Second warm-up frame: the other directional-shadow variant.
+            for (l, own) in &mut self.lights {
+                if l.is_instance_valid() {
+                    l.set_shadow(!*own);
+                }
+            }
         }
     }
 
-    /// Frees the proxies (also when the renderer leaves the tree mid-warm-up).
+    /// Frees the proxies and restores the lights (also when the renderer leaves the tree
+    /// mid-warm-up).
     pub fn clear(&mut self) {
         free_node(self.root.take());
+        for (mut l, own) in self.lights.drain(..) {
+            if l.is_instance_valid() {
+                l.set_shadow(own);
+            }
+        }
     }
 
     fn spawn(&mut self, owner: &mut Gd<Node>, scan: &Gd<Node>, cam: &Gd<Camera3D>) {
         let mut found: Vec<(Variant, Gd<Material>)> = Vec::new();
         let mut seen: HashSet<Variant> = HashSet::new();
-        collect(scan, owner, &mut seen, &mut found);
+        let mut lights: Vec<Gd<DirectionalLight3D>> = Vec::new();
+        collect(scan, owner, &mut seen, &mut found, &mut lights);
+        self.lights = lights.into_iter().map(|l| {
+            let own = l.has_shadow();
+            (l, own)
+        }).collect();
         self.count = found.len();
         if found.is_empty() {
             return;
@@ -160,9 +184,12 @@ impl ShaderWarmup {
 
 /// Collects one entry per distinct (material, draw variant) under `node`, internal children
 /// included; skips `skip` (the renderer's own pipeline).
-fn collect(node: &Gd<Node>, skip: &Gd<Node>, seen: &mut HashSet<Variant>, out: &mut Vec<(Variant, Gd<Material>)>) {
+fn collect(node: &Gd<Node>, skip: &Gd<Node>, seen: &mut HashSet<Variant>, out: &mut Vec<(Variant, Gd<Material>)>, lights: &mut Vec<Gd<DirectionalLight3D>>) {
     if node == skip {
         return;
+    }
+    if let Ok(l) = node.clone().try_cast::<DirectionalLight3D>() {
+        lights.push(l);
     }
     if let Ok(g) = node.clone().try_cast::<GeometryInstance3D>() {
         let layers = g.get_layer_mask();
@@ -211,7 +238,7 @@ fn collect(node: &Gd<Node>, skip: &Gd<Node>, seen: &mut HashSet<Variant>, out: &
     let n = node.get_child_count_ex().include_internal(true).done();
     for i in 0..n {
         if let Some(c) = node.get_child_ex(i).include_internal(true).done() {
-            collect(&c, skip, seen, out);
+            collect(&c, skip, seen, out, lights);
         }
     }
 }

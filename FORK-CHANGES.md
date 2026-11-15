@@ -22,6 +22,7 @@ debug builds of the libraries, and the demo scene `demo/hex_island.tscn`.
 | `3a5c3ae` | Demo scene | Fewer fireflies at the camp |
 | `d0d21c8` | Terrain shaders | Wet ground keeps its colour instead of turning grey |
 | `9546014` | Terrain LOD | Spread distant-LOD chunk rebuilds over frames (no orbit stutter) |
+| *(next)* | Pixel renderer | Warm up the shadow-off variant too (no freeze at the first night) |
 
 Each commit that touches Rust source also updates the matching prebuilt debug library in `bin/`,
 because upstream ships those libraries and the demo runs from them without a Rust build.
@@ -216,6 +217,35 @@ rebuilt leaves the queue (its mesh is right again), and chunks dirtied for any o
 | Orbit at 100 m, worst frame | 54–55 ms | 17.4–17.6 ms |
 | Frames over 25 ms at 100 m | 10–11 | 0 |
 | Snap zoom 13 → 100 m | 56–57 ms | under 25 ms |
+
+---
+
+## Warm up the shadow-off variant too — "Warm up the directional shadow-off shader variant"
+
+**Problem.** The first switch to night (F3 → Day/Night → Night, or the clock reaching dusk)
+froze the game.
+
+**Cause.** `PixelDayNight` switches the sun's shadow **off** below `DUSK_FLOOR` (the moon casts
+none). In the Compatibility renderer a directional light's shadow on/off is a shader
+specialization, so the first dusk recompiled every visible material: **5.1 s** on a cold shader
+cache.
+
+Keeping the shadow enabled at zero opacity instead removed the freeze but visibly changed the
+night lighting (brighter and bluer), so the original behaviour was kept and the variant is
+compiled at load instead.
+
+**Change.** The load-time warm-up (`render/warmup.rs`) also collects the scene's
+`DirectionalLight3D`s and flips each one's `shadow_enabled` for its second warm-up frame, so the
+other shadow variant of every warmed material compiles during loading. The lights are then set
+back to the values recorded when the warm-up started (not toggled back, since `PixelDayNight`
+may have rewritten them in between). The cost moves to loading, plus one frame at startup with
+the sun's shadow flipped.
+
+**Files.** `addons/MarchingSquaresTerrain/rust/crates/mst/src/render/warmup.rs`,
+`.../effects/day_night.rs` (comment only).
+
+**Verified.** Cold shader cache, jumping to Night / Dawn / Noon / Night: first night 5,118 ms →
+4.7–8.1 ms. A rendered night frame matches the previous build by eye.
 
 ---
 
