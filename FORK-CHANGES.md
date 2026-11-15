@@ -22,7 +22,8 @@ debug builds of the libraries, and the demo scene `demo/hex_island.tscn`.
 | `3a5c3ae` | Demo scene | Fewer fireflies at the camp |
 | `d0d21c8` | Terrain shaders | Wet ground keeps its colour instead of turning grey |
 | `9546014` | Terrain LOD | Spread distant-LOD chunk rebuilds over frames (no orbit stutter) |
-| *(next)* | Pixel renderer | Warm up the shadow-off variant too (no freeze at the first night) |
+| `15d3a0f` | Pixel renderer | Warm up the shadow-off variant too (no freeze at the first night) |
+| *(next)* | Weather | Thin weather fog as a third-person camera zooms out |
 
 Each commit that touches Rust source also updates the matching prebuilt debug library in `bin/`,
 because upstream ships those libraries and the demo runs from them without a Rust build.
@@ -220,7 +221,7 @@ rebuilt leaves the queue (its mesh is right again), and chunks dirtied for any o
 
 ---
 
-## Warm up the shadow-off variant too — "Warm up the directional shadow-off shader variant"
+## Warm up the shadow-off variant too — `15d3a0f`
 
 **Problem.** The first switch to night (F3 → Day/Night → Night, or the clock reaching dusk)
 froze the game.
@@ -246,6 +247,35 @@ the sun's shadow flipped.
 
 **Verified.** Cold shader cache, jumping to Night / Dawn / Noon / Night: first night 5,118 ms →
 4.7–8.1 ms. A rendered night frame matches the previous build by eye.
+
+---
+
+## Thin weather fog as a third-person camera zooms out — "Thin weather fog as a third-person camera zooms out"
+
+**Problem.** In rain (also Foggy, Cloudy, Storm), zooming the camera out turned the whole island
+grey.
+
+**Cause.** Godot's exponential fog grows with the distance from the **camera**:
+`1 − exp(−density × d)`. Zoomed out to 100 m, even the ground under the player is 100 m away, so
+with the Rain preset it is about 63 % fog, against about 12 % at the default 13 m zoom. The fog
+is applied while the 3D scene is drawn, before the pixel pass; the pixel pass only snaps the
+already-fogged colours to the palette.
+
+**Change.** New `PixelWeather.fog_focus_distance` (metres, 0 = off, the default, so other
+projects are unaffected). When the active camera is farther than that from its subject (the
+camera's `pixel_snap_distance` meta, which the player already sets to the spring length for the
+pixel renderer), the weather's fog density is scaled by `fog_focus_distance / distance`. The fog
+at the subject then stays what it is at `fog_focus_distance`, while farther scenery still fades
+into it. Applied where the weather publishes its mix, so both `PixelDayNight` and the weather's
+own fallback grading use it. The demo sets it to 13 m (its default zoom), so the default view is
+unchanged.
+
+**Files.** `addons/MarchingSquaresTerrain/rust/crates/mst/src/effects/weather.rs`,
+`demo/hex_island.tscn`.
+
+**Verified.** Rain rendered at 13 m and 100 m zoom, setting off vs on: at 13 m the frames match;
+at 100 m the island keeps its green and sand instead of turning grey, and the sea and sky show
+the rain and cloud cover through less haze.
 
 ---
 
