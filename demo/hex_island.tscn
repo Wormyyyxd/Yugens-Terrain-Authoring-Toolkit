@@ -462,7 +462,7 @@ halo_intensity = 0.75
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 11.5, 6.4, -4.2)
 
 [node name="Fireflies" type="PixelFireflies" parent="." unique_id=1125234400]
-count = 64
+count = 40
 extents = Vector3(9, 1.5, 9)
 size = 0.14
 energy = 3.0

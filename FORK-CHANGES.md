@@ -18,6 +18,8 @@ debug builds of the libraries, and the demo scene `demo/hex_island.tscn`.
 | `c088305` | Demo player | Respawn on the last ground after falling off the map |
 | `1551a88` | Weather / day-night | Keep fog enabled while a weather drives it (no rain hitch) |
 | `3c2dc04` | Pixel renderer | Warm up effect shaders while the scene loads |
+| `9518435` | Docs | Add this file |
+| *(next)* | Demo scene | Fewer fireflies at the camp |
 
 Each commit that touches Rust source also updates the matching prebuilt debug library in `bin/`,
 because upstream ships those libraries and the demo runs from them without a Rust build.
@@ -123,6 +125,18 @@ fog change above).
 **Verified.** Scripted run with the game's shader cache deleted first: ignite a grass fire, then
 Rain, Snow, Storm, Clear and reset, twice. Worst frame 178 ms before (first rain), 16 ms after
 both changes. Lighting a fire in the rain: 32 ms → 9 ms.
+
+---
+
+## Fewer fireflies at the camp — "Thin out the demo's fireflies"
+
+**Problem.** Playtest feedback: the fireflies around the camp at night were a little too dense.
+
+**Change.** `Fireflies.count` in the demo scene from 64 to 40 (the `PixelFireflies` default is
+48), over the same 18 × 18 m area. Pure tuning; the addon is unchanged. The count can be tried
+live in the F3 tuner (Effects → Fireflies).
+
+**Files.** `demo/hex_island.tscn`.
 
 ---
 
