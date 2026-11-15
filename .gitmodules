@@ -1,0 +1,7 @@
+[submodule "addons/phantom_camera_rust"]
+	path = addons/phantom_camera_rust
+	url = https://github.com/notnilcn/godot-phantom-camera-rust
+[submodule "addons/MarchingSquaresTerrain"]
+	path = addons/MarchingSquaresTerrain
+	url = https://github.com/notnilcn/Yugens-Terrain-Authoring-Toolkit-rust
+	branch = addons
