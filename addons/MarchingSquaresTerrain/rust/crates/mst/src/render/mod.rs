@@ -5,3 +5,4 @@ pub mod outline_palette;
 pub mod palette;
 pub mod profile;
 pub mod renderer;
+pub mod warmup;

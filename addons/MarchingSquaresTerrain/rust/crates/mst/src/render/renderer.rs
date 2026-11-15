@@ -322,7 +322,13 @@ pub struct PixelRenderer {
     depth_range: f32,
     #[export(enum = (Final, Normals, Depth, PixelSize, OutlineIds, RawColor, OutlineCause, GodRays))]
     debug_view: i32,
+    /// Draw every material of the scene once while it loads (game only), so the Compatibility
+    /// renderer compiles hidden / off-screen effects (rain, snow, fire steam, ...) up front instead
+    /// of hitching the first time they appear. See `warmup.rs`.
+    #[export]
+    warm_up_shaders: bool,
 
+    warmup: super::warmup::ShaderWarmup,
     pipeline: Option<Pipeline>,
     outline_tex: Option<Gd<ImageTexture>>,
     outline_key: (u64, i64, Vec<[u32; 4]>),
@@ -476,6 +482,8 @@ impl INode for PixelRenderer {
             ray_dawn_dusk: 0.0,
             ray_adaptation: RAY_ADAPTATION,
             debug_view: 0,
+            warm_up_shaders: true,
+            warmup: Default::default(),
             pipeline: None,
             outline_tex: None,
             outline_key: (0, 0, Vec::new()),
@@ -520,10 +528,21 @@ impl INode for PixelRenderer {
         }
         if !is_editor() {
             self.update_focus();
+            if self.warm_up_shaders && self.pipeline.is_some() && !self.warmup.is_done() {
+                let mut this = self.to_gd().upcast::<Node>();
+                let cam = self.active_camera();
+                if let Some(scan) = self.base().get_viewport() {
+                    self.warmup.step(&mut this, scan.upcast(), cam);
+                    if self.warmup.is_done() && self.warmup.proxy_count() > 0 {
+                        godot_print!("PixelRenderer: warmed up {} shader variants",self.warmup.proxy_count());
+                    }
+                }
+            }
         }
     }
 
     fn exit_tree(&mut self) {
+        self.warmup.clear();
         globals::set("pt_rays_a", &Vector4::ZERO.to_variant());
         self.sun_ref.reset();
         self.teardown();
