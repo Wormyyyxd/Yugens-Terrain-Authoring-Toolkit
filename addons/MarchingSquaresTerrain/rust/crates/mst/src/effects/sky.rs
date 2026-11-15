@@ -77,6 +77,13 @@ pub struct PixelSky {
     /// Color of the sun-facing-away side of each cloud.
     #[export]
     deck_shade_color: Color,
+    /// The deck is drawn at least this far (m) above the camera (higher than `cloud_height`
+    /// when the camera climbs): a camera near the deck plane saw it edge-on (clouds vanished or
+    /// smeared across the view), and above it the clouds covered the ground. Cloud shadows and
+    /// god rays keep `cloud_height`; the deck shows the same clouds (sampled by XZ). 0 = always
+    /// at `cloud_height`.
+    #[export(range = (0.0, 200.0, 0.5, or_greater))]
+    deck_clearance: f32,
 
     offset: Vector2,
     deck: Option<Gd<MeshInstance3D>>,
@@ -103,6 +110,7 @@ impl INode3D for PixelSky {
             deck_opacity: 0.85,
             deck_color: Color::from_rgb(1.0, 0.98, 0.95),
             deck_shade_color: Color::from_rgb(0.72, 0.74, 0.85),
+            deck_clearance: 25.0,
             offset: Vector2::ZERO,
             deck: None,
             deck_mat: None,
@@ -267,9 +275,11 @@ impl PixelSky {
             Some(c) => {
                 let t = c.get_global_transform();
                 let fwd = -t.basis.col_c();
-                let hit = if fwd.y.abs() > 1e-3 { (self.cloud_height - t.origin.y) / fwd.y } else { -1.0 };
+                // Never at (edge-on) or under the camera: lift the deck with a climbing camera.
+                let deck_y = if self.deck_clearance > 0.0 { self.cloud_height.max(t.origin.y + self.deck_clearance) } else { self.cloud_height };
+                let hit = if fwd.y.abs() > 1e-3 { (deck_y - t.origin.y) / fwd.y } else { -1.0 };
                 let p = if hit > 0.0 { t.origin + fwd * hit.min(self.deck_size) } else { t.origin };
-                Vector3::new(p.x, self.cloud_height, p.z)
+                Vector3::new(p.x, deck_y, p.z)
             }
             None => {
                 let p = self.base().get_global_position();

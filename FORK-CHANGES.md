@@ -28,7 +28,8 @@ debug builds of the libraries, and the demo scene `demo/hex_island.tscn`.
 | `0027345` | Weather | Revert `596d005` (it moved the grey problem around instead of fixing it) |
 | `d0011ab` | Pixel renderer | Draw fog after the palette, so fogged things keep their colour |
 | `fefa2f6` | Grass / props | Grass and trees sway with the weather's wind |
-| *(next)* | Pixel renderer | Add god rays after the palette, so they actually show |
+| `c3086f0` | Pixel renderer | Add god rays after the palette, so they actually show |
+| *(next)* | Sky | Keep the cloud deck above the camera (no vanishing / smeared clouds) |
 
 Each commit that touches Rust source also updates the matching prebuilt debug library in `bin/`,
 because upstream ships those libraries and the demo runs from them without a Rust build.
@@ -414,7 +415,7 @@ change over 0.2 s doubles from 6.3 % to 12.4 %. No shader compile errors.
 
 ---
 
-## Add god rays after the palette — "Add god rays after the palette so faint shafts show"
+## Add god rays after the palette — `c3086f0`
 
 **Problem.** Playtest: no visible god rays, even when changing their colour or settings.
 
@@ -435,6 +436,29 @@ fog), in a shared `add_rays()` function. Off restores the previous order.
 +23.5 RGB on average (was 38.1 % / +18.6), and ray colour / strength changes now show. At the
 default strength the rays read as a warm glow with faint diagonal banding; distinct shafts need a
 higher `ray_strength` or a view towards the sun through cloud gaps (not retuned here).
+
+---
+
+## Keep the cloud deck above the camera — "Keep the cloud deck above the camera"
+
+**Problem.** Playtest: at a certain camera height the clouds disappeared.
+
+**Cause.** `PixelSky`'s visible cloud deck is a flat sheet at `cloud_height` (40 m) that follows
+the camera. A camera near 40 m (zoomed out, tilted down) sees it **edge-on**, so it collapses to
+a line. Just below that it smeared white across the whole view at a grazing angle, and above it
+the clouds sat under the camera and covered the island.
+
+**Change.** New `PixelSky.deck_clearance` (25 m by default; 0 = old behaviour): the deck is
+drawn at the higher of `cloud_height` and the camera height plus the clearance, so it rises
+smoothly with a climbing camera and is never edge-on or below it. Cloud shadows and god rays
+still use `cloud_height`, and the deck shows the same clouds (they are sampled by XZ only).
+
+**Files.** `addons/MarchingSquaresTerrain/rust/crates/mst/src/effects/sky.rs`; rebuilt
+`addons/MarchingSquaresTerrain/bin/marching_squares_terrain.dll` (this build also contains
+`c3086f0`).
+
+**Verified.** Rendered at 100 m zoom with the camera at 29, 39 and 48 m: before, normal / white
+smear over the island / clouds blanketing the island; after, a normal sky in all three.
 
 ---
 
