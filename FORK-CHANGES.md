@@ -30,7 +30,7 @@ debug builds of the libraries, and the demo scene `demo/hex_island.tscn`.
 | `fefa2f6` | Grass / props | Grass and trees sway with the weather's wind |
 | `c3086f0` | Pixel renderer | Add god rays after the palette, so they actually show |
 | `f9989a2` | Sky | Keep the cloud deck above the camera (no smeared / covering clouds when zoomed out high) |
-| *(next)* | Sky | Keep the camera inside the cloud deck (clouds vanished when tilting up close) |
+| `e64bc8e` | Sky | Keep the camera inside the cloud deck (clouds vanished when tilting up close) |
 
 Each commit that touches Rust source also updates the matching prebuilt debug library in `bin/`,
 because upstream ships those libraries and the demo runs from them without a Rust build.
@@ -465,7 +465,7 @@ smear over the island / clouds blanketing the island; after, a normal sky in all
 
 ---
 
-## Keep the camera inside the cloud deck — "Keep the camera inside the cloud deck"
+## Keep the camera inside the cloud deck — `e64bc8e`
 
 **Problem.** Playtest: zoomed in close and tilting the camera up towards the sky, the clouds
 vanished at one very specific camera height.
