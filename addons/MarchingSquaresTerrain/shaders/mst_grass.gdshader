@@ -21,6 +21,8 @@ uniform int mst_debug_view = 0;
 #include "res://addons/MarchingSquaresTerrain/shaders/pixel_weather.gdshaderinc"
 // [PixelFireSystem hook] burning / burnt / wet / regrowing blades (pixel_fire.gdshaderinc)
 #include "res://addons/MarchingSquaresTerrain/shaders/pixel_fire.gdshaderinc"
+// [PixelWeather wind] pt_wind (pixel_wind.gdshaderinc)
+#include "res://addons/MarchingSquaresTerrain/shaders/pixel_wind.gdshaderinc"
 
 group_uniforms Sprites;
 /// One layer per texture slot (bound by the terrain node). Unbound = transparent (no squares).
@@ -67,6 +69,11 @@ uniform float gust_spacing = 9.0;
 uniform float gust_speed = 3.0;
 /// Blades over a fire flutter in its updraft.
 uniform float fire_flutter : hint_range(0.0, 1.0) = 0.35;
+/// Follow PixelWeather's wind (pt_wind, pixel_wind.gdshaderinc): its direction replaces
+/// `wind_direction`, its strength (1 = the default breeze, storms 3-4) scales `wind_strength` and
+/// its gustiness scales `gust_strength`. Speeds stay fixed, so weather changes never make the
+/// animation jump.
+uniform bool use_global_wind = true;
 group_uniforms;
 
 group_uniforms Shading;
@@ -105,6 +112,16 @@ void vertex() {
 			t = floor(t * animation_fps) / animation_fps;
 		}
 		vec2 wd = normalize(wind_direction + vec2(1e-4));
+		float wind_k = 1.0;
+		float gust_k = 1.0;
+		if (use_global_wind) {
+			if (length(pt_wind.xy) > 1e-3) {
+				wd = normalize(pt_wind.xy);
+			}
+			wind_k = clamp(pt_wind.z, 0.0, 6.0);
+			// Gustiness 0..1 (Clear 0.25): 1x the authored gusts at the default breeze.
+			gust_k = clamp(pt_wind.w, 0.0, 1.0) * 4.0;
+		}
 		float gust;
 		if (use_wind_texture) {
 			vec2 wuv = root_world.xz * wind_scale + wd * t * wind_speed;
@@ -117,8 +134,8 @@ void vertex() {
 		// further, then they spring back.
 		float front = fract(dot(root_world.xz, wd) / max(gust_spacing, 0.5) - t * gust_speed / max(gust_spacing, 0.5));
 		float crest = smoothstep(0.0, 0.25, front) * (1.0 - smoothstep(0.25, 0.6, front));
-		gust += crest * gust_strength * (0.7 + 0.6 * pt_vnoise(root_world.xz * 0.15 + 3.0));
-		sway = vec3(wd.x, 0.0, wd.y) * gust * wind_strength * top;
+		gust += crest * gust_strength * gust_k * (0.7 + 0.6 * pt_vnoise(root_world.xz * 0.15 + 3.0));
+		sway = vec3(wd.x, 0.0, wd.y) * gust * wind_strength * wind_k * top;
 		// Updraft flutter over burning ground.
 		float fl = fire.x * fire_flutter;
 		sway += vec3(sin(t * 23.0 + r * 40.0), 0.0, cos(t * 19.0 + r * 31.0)) * fl * 0.12 * top;

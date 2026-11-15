@@ -27,6 +27,7 @@ debug builds of the libraries, and the demo scene `demo/hex_island.tscn`.
 | `857a984` | Terrain LOD | Keep chunks at full detail for 3 s; keep collision when dropping detail |
 | `0027345` | Weather | Revert `596d005` (it moved the grey problem around instead of fixing it) |
 | `d0011ab` | Pixel renderer | Draw fog after the palette, so fogged things keep their colour |
+| *(next)* | Grass / props | Grass and trees sway with the weather's wind |
 
 Each commit that touches Rust source also updates the matching prebuilt debug library in `bin/`,
 because upstream ships those libraries and the demo runs from them without a Rust build.
@@ -377,6 +378,38 @@ the palette off (a hazy but clearly coloured image) and on (flat grey).
   noise even in light fog).
 - Cold shader cache: fire / Rain / Snow / Storm sequence and the Night / Dawn / Noon jumps, worst
   frame 21 ms.
+
+---
+
+## Grass and trees sway with the weather's wind — "Make grass and props sway with the weather's wind"
+
+**Problem.** Playtest wish: the wind should move the grass and the trees.
+
+**Cause.** `PixelWeather` publishes a wind every frame (`pt_wind`: direction, strength, gustiness)
+and the addon ships a shared helper for it (`pixel_wind.gdshaderinc`), but neither plant shader
+used it. Grass had its own wind with a fixed direction and strength, so it never reacted to the
+weather. Props (trees, pines, bushes, flowers) had a `wind_sway` that was a plain sine wobble of
+a few centimetres, below one pixel at the default zoom, and also ignored the weather.
+
+**Change.**
+- `mst_grass.gdshader`: new `use_global_wind` (on). The weather's wind direction replaces
+  `wind_direction`, its strength (1 = the default breeze, about 3 in Rain, more in Storm)
+  scales `wind_strength`, and its gustiness scales the gust fronts. At the default breeze the
+  grass looks as before.
+- `mst_scatter.gdshader`: `wind_sway` now means metres of lean per metre of height above the
+  prop's base at wind strength 1. Each prop leans as a whole along the wind with travelling gust
+  bands and a little flutter (sampled at its base so the canopy moves together), snapped to
+  1/24 m steps so it stays pixel-art. The demo's existing values (tree 0.05, pine 0.03,
+  bush 0.04, flowers 0.06) now give visible motion.
+- Both keep their animation **speeds** fixed and only scale the **amount** with the wind. The
+  shared helper's own functions speed up with the wind strength, which makes the motion jump
+  while the weather blends (time × a changing rate), so they are not used for the timing.
+
+**Files.** `addons/MarchingSquaresTerrain/shaders/mst_grass.gdshader`,
+`addons/MarchingSquaresTerrain/shaders/mst_scatter.gdshader` (shaders only, no rebuild needed).
+
+**Verified.** Rendered the demo in Clear and in Storm: the share of plant-area pixels that
+change over 0.2 s doubles from 6.3 % to 12.4 %. No shader compile errors.
 
 ---
 
