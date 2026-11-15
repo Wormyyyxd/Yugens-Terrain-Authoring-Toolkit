@@ -9,5 +9,9 @@ addons/MarchingSquaresTerrain/bin/
 tests/captures/
 # Godot's atomic saves leave <file>.tmp behind when interrupted.
 *.tmp
+# Godot copies each extension library to <file>~ for hot-reloading and deletes that copy when the
+# editor or game starts. They are runtime caches, so tracking them makes every launch show three
+# spurious deletions in the working tree. Built by tools/build.*, never edited by hand.
+~*.dll
 # Demo-only player controller library (built by tools/build.*).
 demo/bin/
