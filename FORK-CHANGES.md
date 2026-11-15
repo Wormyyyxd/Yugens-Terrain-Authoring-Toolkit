@@ -19,7 +19,8 @@ debug builds of the libraries, and the demo scene `demo/hex_island.tscn`.
 | `1551a88` | Weather / day-night | Keep fog enabled while a weather drives it (no rain hitch) |
 | `3c2dc04` | Pixel renderer | Warm up effect shaders while the scene loads |
 | `9518435` | Docs | Add this file |
-| *(next)* | Demo scene | Fewer fireflies at the camp |
+| `3a5c3ae` | Demo scene | Fewer fireflies at the camp |
+| *(next)* | Terrain shaders | Wet ground keeps its colour instead of turning grey |
 
 Each commit that touches Rust source also updates the matching prebuilt debug library in `bin/`,
 because upstream ships those libraries and the demo runs from them without a Rust build.
@@ -128,7 +129,7 @@ both changes. Lighting a fire in the rain: 32 ms → 9 ms.
 
 ---
 
-## Fewer fireflies at the camp — "Thin out the demo's fireflies"
+## Fewer fireflies at the camp — `3a5c3ae`
 
 **Problem.** Playtest feedback: the fireflies around the camp at night were a little too dense.
 
@@ -137,6 +138,51 @@ both changes. Lighting a fire in the rain: 32 ms → 9 ms.
 live in the F3 tuner (Effects → Fireflies).
 
 **Files.** `demo/hex_island.tscn`.
+
+---
+
+## Wet ground keeps its colour — "Keep wet ground's colour instead of greying it"
+
+**Problem.** In rain, grass-covered ground and paths turned grey-purple instead of a darker,
+wetter version of themselves.
+
+**Cause.** Measured on the renderer's Raw Color debug view (before palette snapping), comparing
+the same pixels dry and wet:
+
+- Ground wetness was a plain multiply with a blue tint, `× 0.66 × (0.9, 0.96, 1.06)` in
+  `pt_weather_surface`, and the fire system's wet-patch layer multiplied again by
+  `(0.8, 0.86, 0.9)`. The fire field is wet everywhere while it rains, so both always applied:
+  red × 0.48, green × 0.55, blue × 0.63. That cancels the warmth of sand, dirt and paths: a tan
+  path `(222,189,142)` became neutral grey `(101,100,88)` from wetness alone, which the palette
+  then snapped to its grey ramp.
+- The Rain preset's blue-grey fog (65 % mix) greys distant colours further. That is the
+  intended rainy mood and was left alone.
+
+**Change.**
+- `pt_weather_surface`: wet ground is darkened to 66 % *and* its saturation raised by up to
+  35 % (real wet ground looks darker and more saturated); no blue tint.
+- `pt_fire_surface`: the wet-patch darkening (now `× 0.84`, hue kept) fades out as
+  `pt_wet` rises, so ground the weather already wet is not darkened twice. Doused patches in dry
+  weather still show.
+- `pixel_weather.gdshaderinc` defines `PT_WEATHER`; `pixel_fire.gdshaderinc` only reads `pt_wet`
+  when that is defined, so shaders that include `pixel_fire` without `pixel_weather` still
+  compile.
+
+**Files.** `addons/MarchingSquaresTerrain/shaders/pixel_weather.gdshaderinc`,
+`addons/MarchingSquaresTerrain/shaders/pixel_fire.gdshaderinc` (shaders only, no rebuild needed).
+
+**Verified.** Raw colour, averaged over the same ground pixels:
+
+| | Tan path | Green ground |
+|---|---|---|
+| Dry | (222,189,142) | (127,183,80) |
+| Wet only, before | (101,100,88) | (63,109,54) |
+| Wet only, after | (150,122,80) | (76,127,44) |
+| Full Rain, before | (97,101,102) | (80,107,88) |
+| Full Rain, after | (123,112,98) | (86,116,84) |
+
+In the final image, foreground grass ground stays green and dirt turns a wet brown. No shader
+compile errors.
 
 ---
 

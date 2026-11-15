@@ -20,6 +20,16 @@ bool pt_fire_on() {
 	return pt_fire_a.x > 0.5;
 }
 
+// How wet PixelWeather already made the ground (0 without pixel_weather.gdshaderinc included
+// first): wet patches only darken what the weather has not.
+float pt_fire_weather_wet() {
+#ifdef PT_WEATHER
+	return clamp(pt_wet, 0.0, 1.0);
+#else
+	return 0.0;
+#endif
+}
+
 vec4 pt_fire_fetch(ivec2 t) {
 	ivec2 size = ivec2(pt_fire_a.zw);
 	return texelFetch(pt_fire_tex, clamp(t, ivec2(0), size - 1), 0);
@@ -59,7 +69,9 @@ vec3 pt_fire_surface(vec3 albedo, vec3 wp, bool wall, float t) {
 		}
 	}
 	if (f.b > 0.3 + n * 0.2) {
-		albedo *= vec3(0.8, 0.86, 0.9);
+		// Doused / soaked patches: darker, hue kept (a blue tint greyed warm soils). The field
+		// is wet everywhere while it rains, so fade this out as the weather wets the ground.
+		albedo *= mix(1.0, 0.84, 1.0 - pt_fire_weather_wet());
 	}
 	if (f.r > 0.04) {
 		// Embers: flickering speckles, denser where it burns hotter.

@@ -4,7 +4,10 @@
 // Everything is banded/stepped so it stays pixel-art; all functions are no-ops when the
 // globals are at their defaults (no weather, no water).
 
-global uniform float pt_wet;     // 0 = dry, 1 = soaked (darker ground, puddles, drop sparkles)
+// Lets hooks included later (pixel_fire.gdshaderinc) read pt_wet when it is available.
+#define PT_WEATHER
+
+global uniform float pt_wet;    // 0 = dry, 1 = soaked (darker ground, puddles, drop sparkles)
 global uniform float pt_snow;    // 0 = none, 1 = everything but cliffs is white
 global uniform vec4 pt_water_a;  // enabled, water level (world y), 0, 0
 global uniform vec4 pt_water_b;  // caustics strength, scale, bands, reach above the water line
@@ -153,8 +156,12 @@ float pt_snow_grass_scale(float cover) {
 // Ground wetness and snow. `n` is the world normal, `wall` excludes cliff faces from snow.
 vec3 pt_weather_surface(vec3 albedo, vec3 wp, vec3 n, bool wall, float t) {
 	if (pt_wet > 0.001) {
+		// Wet ground is darker and a little more saturated (water fills the surface, so less
+		// light scatters back white). A plain multiply with a blue tint pulled warm soils (sand,
+		// dirt, paths) to neutral grey, which the palette then snapped to its grey ramp.
+		float l = dot(albedo, vec3(0.299, 0.587, 0.114));
+		albedo = max(mix(vec3(l), albedo, 1.0 + 0.35 * pt_wet), vec3(0.0));
 		albedo *= mix(1.0, 0.66, pt_wet);
-		albedo *= mix(vec3(1.0), vec3(0.9, 0.96, 1.06), pt_wet);
 		float flat_ground = step(0.85, n.y) * (wall ? 0.0 : 1.0);
 		float pud = pt_vnoise(wp.xz * 0.45 + 11.0) * 0.7 + pt_vnoise(wp.xz * 1.9) * 0.3;
 		if (flat_ground > 0.5 && pud > 1.0 - 0.3 * pt_wet) {
