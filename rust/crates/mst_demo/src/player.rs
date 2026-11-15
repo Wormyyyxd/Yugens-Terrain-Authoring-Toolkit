@@ -203,6 +203,11 @@ pub struct MstDemoPlayer {
     spawned: bool,
     /// The first-landing facing (`spawn_face_deg`) was applied.
     faced: bool,
+    /// Where the scene placed the body (the respawn point before it has stood anywhere).
+    start_position: Vector3,
+    /// The last position the body stood on the floor; a fall below `fall_limit` respawns here,
+    /// since the terrain has no height off the island where the body fell.
+    last_ground: Option<Vector3>,
     rig: Option<Rig>,
     animator: Option<Animator>,
     /// Seconds to the next x-ray probe; blocked body rays toward the camera at the last one.
@@ -260,6 +265,8 @@ impl ICharacterBody3D for MstDemoPlayer {
             gravity: 9.8,
             spawned: false,
             faced: false,
+            start_position: Vector3::ZERO,
+            last_ground: None,
             rig: None,
             animator: None,
             xray_probe_wait: 0.0,
@@ -273,6 +280,7 @@ impl ICharacterBody3D for MstDemoPlayer {
 
     fn ready(&mut self) {
         ensure_input_actions();
+        self.start_position = self.base().get_global_position();
         self.gravity = ProjectSettings::singleton().get_setting("physics/3d/default_gravity").try_to::<f32>().unwrap_or(9.8);
         if self.phantom_camera.as_ref().is_some_and(|p| !p.is_class("PhantomCamera3D")) {
             godot_warn!("MstDemoPlayer: phantom_camera is not a PhantomCamera3D (Phantom Camera library missing?)");
@@ -327,6 +335,12 @@ impl ICharacterBody3D for MstDemoPlayer {
     fn physics_process(&mut self, delta: f64) {
         let dt = delta as f32;
         if self.spawn_on_terrain && (!self.spawned || self.base().get_global_position().y < self.fall_limit) {
+            if self.spawned {
+                // Fell off the map: `spawn` samples the terrain under the body, and there is none
+                // out here, so it would hold the body below the map forever. Go back first.
+                let back = self.last_ground.unwrap_or(self.start_position);
+                self.base_mut().set_global_position(back);
+            }
             self.spawned = self.spawn();
             if !self.spawned {
                 // Terrain not ready: hold still (no gravity) instead of falling through it.
@@ -390,6 +404,9 @@ impl ICharacterBody3D for MstDemoPlayer {
             let v = body.get_real_velocity();
             (Vector2::new(v.x, v.z).length(), body.is_on_floor(), self.stride_length, self.move_speed)
         };
+        if grounded {
+            self.last_ground = Some(self.base().get_global_position());
+        }
         if let Some(animator) = self.animator.as_mut() {
             animator.update(dt, speed, grounded, jumped);
         } else if let Some(rig) = self.rig.as_mut() {
